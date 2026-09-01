@@ -55,6 +55,11 @@ A `--gotcha` is worth writing whenever you know something a fresh session would 
 New subagents are blocked at this point. Small remaining work goes inline, where its
 partial results stay in this session instead of vanishing with a delegation.
 
+Guardian may already have sealed one by itself on the way into `LAND`. That does not replace
+step 2 or step 3: an automatic seal has the files, commands and commits, and it cannot have
+the note, because you had not written it yet. Record the intent and seal again — the second
+manifest supersedes the first and carries what the first could not.
+
 ### EMERGENCY
 
 The next request may be refused. Do two commands, nothing else:

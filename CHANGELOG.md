@@ -91,6 +91,20 @@ reconstruction still reads far below the wall. None is an estimator blind spot.
   the description absorbs the truncation alone — trimming the whole line took the context
   warning and the clock, which are the fields a decision near a wall is made on.
 
+### Landing
+
+- **Guardian seals by itself from `LAND` upward.** `landing.force_seal_turn` only refuses one
+  turn-end and then asks the model to seal, which needs a turn to actually end and a model to
+  comply; when either fails, the session is what is lost. `landing.auto_seal_from` (default
+  `LAND`) seals from `PostToolUse` — async by necessity, since a seal runs git and the sensor
+  has a 2.4ms budget. The latch is written before the seal, so a failing seal cannot storm;
+  it re-arms if the window refills and the mode drops back, so a later climb seals the newer
+  work; and a handoff sealed by hand counts until there is work recorded after it. Set it to
+  `HARD_STOPPED` to switch it off.
+- `landing.inject_from` and `landing.auto_seal_from` are now validated as mode names. Setting
+  `landing.inject_from land` used to be accepted and silently matched nothing, which made
+  Guardian inject at every mode rather than the one asked for.
+
 ### Found by using it
 
 Everything below was found by running the tool against real work, after the suite was

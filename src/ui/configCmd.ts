@@ -8,7 +8,11 @@ import { configPath, ensureGuardianDir } from '../core/paths.ts';
 type Plain = Record<string, unknown>;
 
 /** Paths whose value must be one of the mode names. */
-const MODE_PATHS = [/^axis_severity_cap\.[a-z_]+$/, /^agents\.(deny_spawn_from|inject_checkpoint_prompt_from)$/];
+const MODE_PATHS = [
+  /^axis_severity_cap\.[a-z_]+$/,
+  /^agents\.(deny_spawn_from|inject_checkpoint_prompt_from)$/,
+  /^landing\.(inject_from|auto_seal_from)$/,
+];
 
 function isModePath(path: string): boolean {
   return MODE_PATHS.some((re) => re.test(path));
@@ -269,6 +273,11 @@ export const HELP: Record<string, string> = {
   'agents.deny_spawn_from': 'mode at which new subagents are refused; HARD_STOPPED disables the gate',
   'agents.inject_checkpoint_prompt_from': 'mode at which spawned agents are told to checkpoint',
   safe_boundary_commands: 'irreversible commands to record as possibly-interrupted; never blocked',
+  'landing.inject_from': 'mode at which Guardian starts injecting a brief into the conversation',
+  'landing.force_seal_turn': 'let the Stop hook refuse one turn-end to force a seal',
+  'landing.auto_seal_from':
+    'mode at which Guardian seals by itself, without waiting for the model; HARD_STOPPED disables it',
+  'landing.halt_loop_at_emergency': 'halt the agentic loop at EMERGENCY once a handoff is sealed',
   'statusline.chained_from': 'settings file the chained command is re-read from each tick',
   'statusline.chain_timeout_ms': 'how long the chained status line may take before it is dropped',
   'statusline.own_line': "put Guardian's segment on its own line under the one it chained",

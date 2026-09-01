@@ -78,7 +78,7 @@ export interface GuardianState {
   /** Bounded ring of recent observations, oldest first. */
   samples: Sample[];
   /** Latches that must fire at most once per session. */
-  latches: { stop_forced?: boolean; resume_offered?: boolean };
+  latches: { stop_forced?: boolean; resume_offered?: boolean; auto_sealed?: boolean };
   /** Set when a 429 has been observed, with the epoch second the window reopens. */
   hard_stop: { at: number; kind: string; resets_at: number | null } | null;
   manifest: { sealed_at: number | null };
@@ -106,6 +106,10 @@ export interface GuardianConfig {
     inject_from: Mode;
     /** Let the Stop hook refuse one turn-end to force a seal. Single-shot per session. */
     force_seal_turn: boolean;
+    /** Mode at which Guardian seals a handoff by itself, without waiting for a turn to end
+     *  or for the model to comply. Re-arms if the mode falls back below it. Setting it to
+     *  HARD_STOPPED effectively turns it off: that mode already seals on its own. */
+    auto_seal_from: Mode;
     /** Halt the agentic loop at EMERGENCY once a handoff is sealed. Off by default: an
      *  unexpected halt is worse than the problem for most users. */
     halt_loop_at_emergency: boolean;

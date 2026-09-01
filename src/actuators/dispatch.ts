@@ -3,8 +3,20 @@ import { readFileSync } from 'node:fs';
 import { resolveStateRoot } from '../core/paths.ts';
 import { loadConfig } from '../core/config.ts';
 import { readState, writeState } from '../core/state.ts';
-import { appendEvent, fileEvent, commandEvent, classifyCommand } from '../handoff/ledger.ts';
-import { seal, hasUnconsumed, latestDigestPath, readLatest } from '../handoff/manifest.ts';
+import {
+  appendEvent,
+  fileEvent,
+  commandEvent,
+  classifyCommand,
+  readLedger,
+} from '../handoff/ledger.ts';
+import {
+  seal,
+  hasUnconsumed,
+  latestDigestPath,
+  latestPath,
+  readLatest,
+} from '../handoff/manifest.ts';
 import { gateSpawn, markBoundary } from './gate.ts';
 import { readAgents, writeAgents, recordDuration } from '../sensors/agents.ts';
 import {
@@ -100,12 +112,17 @@ function onPostToolUse(inp: HookInput, projectDir: string, sid: string, now: num
   if (EDIT_TOOLS.has(tool)) {
     const p = editedPath(inp.tool_input);
     if (p) appendEvent(projectDir, sid, fileEvent(p, tool, now));
-    return NOTHING;
+    return autoSeal(projectDir, sid, now);
   }
 
-  if (tool === 'Bash' || tool === 'PowerShell') {
-    const cmd = typeof inp.tool_input?.command === 'string' ? inp.tool_input.command : '';
-    if (!cmd) return NOTHING;
+  const cmd =
+    tool === 'Bash' || tool === 'PowerShell'
+      ? typeof inp.tool_input?.command === 'string'
+        ? inp.tool_input.command
+        : ''
+      : '';
+
+  if (cmd) {
     appendEvent(projectDir, sid, commandEvent(cmd, inp.tool_output ?? '', now));
 
     // A commit is worth recording as a durable landmark, but the command text is not the
@@ -122,7 +139,73 @@ function onPostToolUse(inp: HookInput, projectDir: string, sid: string, now: num
       }
     }
   }
-  return NOTHING;
+  return autoSeal(projectDir, sid, now);
+}
+
+/** Seal without being asked, once the session is close enough to a wall.
+ *
+ *  `force_seal_turn` asks the model to seal and waits for a turn to end; both of those can
+ *  fail — a turn that never ends, or a model that reads the instruction and keeps working —
+ *  and what is lost when they do is the whole session. This path needs neither. It fires
+ *  from an async hook by necessity: a seal runs git, which belongs nowhere near the
+ *  synchronous gate or the sensor's 2.4ms budget.
+ *
+ *  The latch is written BEFORE the seal, for the same reason the Stop latch is: a seal that
+ *  throws must not be retried on every subsequent tool call. It clears when the mode falls
+ *  back below the threshold, so a session that climbs, recovers and climbs again seals
+ *  twice — the second time with the work the first seal could not have seen. */
+function autoSeal(projectDir: string, sid: string, now: number): HookResult {
+  const cfg = loadConfig(projectDir);
+  const state = readState(projectDir, sid);
+  const armed = severity(state.mode) >= severity(cfg.landing.auto_seal_from);
+
+  if (!armed) {
+    // Re-arm on the way down, and only then: a write on every calm tool call would be a
+    // needless one on the commonest path of all.
+    if (state.latches.auto_sealed) {
+      writeState(projectDir, { ...state, latches: { ...state.latches, auto_sealed: false } });
+    }
+    return NOTHING;
+  }
+  if (state.latches.auto_sealed) return NOTHING;
+
+  // A handoff sealed by hand counts. Guardian tells the model to seal at LAND, so the
+  // common case is that it already has — and re-sealing seconds later would announce a
+  // handoff the model just made. Only work recorded AFTER that seal earns another one;
+  // until then this stays armed rather than latched, so the next edit is still covered.
+  const sealedAt = state.manifest.sealed_at;
+  if (sealedAt !== null && !readLedger(projectDir, sid).some((e) => e.t > sealedAt)) {
+    return NOTHING;
+  }
+
+  const latched: typeof state = {
+    ...state,
+    latches: { ...state.latches, auto_sealed: true },
+  };
+  writeState(projectDir, latched);
+
+  const m = seal(projectDir, sid, latched, `auto-seal (${state.mode})`, now);
+  writeState(projectDir, { ...latched, manifest: { sealed_at: m.sealed_at } });
+
+  const n = m.observed.files_touched.length;
+  const flying = m.agents.filter((a) => a.status === 'IN_FLIGHT_AT_SEAL').length;
+  log(
+    projectDir,
+    'info',
+    `auto-sealed at ${state.mode} (${state.reason}): ${n} file(s), ` +
+      `${m.observed.commits.length} commit(s), ${flying} agent(s) in flight`,
+  );
+  return ok({
+    systemMessage:
+      `🛡 Guardian auto-sealed a handoff at ${state.mode} — ${n} file${n === 1 ? '' : 's'} ` +
+      `tracked, manifest at ${latestPath(projectDir)}.` +
+      (flying
+        ? ` ${flying} agent(s) were still running; the seal records them but does not pause them.`
+        : '') +
+      (m.claude_supplied.next_action
+        ? ''
+        : ' No next action is recorded yet — add one with `guardian note --next "..."`.'),
+  });
 }
 
 const SPAWN_TOOLS = new Set(['Task', 'Agent']);
@@ -306,7 +389,7 @@ function onStopFailure(inp: HookInput, projectDir: string, sid: string, now: num
   return NOTHING;
 }
 
-/** Feed the historical-duration table/** Feed the historical-duration table, which is the only defensible basis Guardian has for
+/** Feed the historical-duration table, which is the only defensible basis Guardian has for
  *  saying how long an agent of a given type is likely to take. Also drops the finished
  *  agent's snapshot so the live count stays honest. */
 function recordAgentDuration(inp: HookInput, projectDir: string, sid: string, now: number): void {

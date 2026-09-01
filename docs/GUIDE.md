@@ -662,6 +662,38 @@ Turn it off with:
 /guardian config set landing.force_seal_turn false
 ```
 
+### The automatic seal
+
+Asking is not the same as sealing. The `Stop` refusal needs two things to go right — a turn
+that actually ends, and a model that reads the instruction and complies rather than carrying
+on — and when either fails, what is lost is the whole session. So from `LAND` upward Guardian
+also seals **by itself**, without being asked and without waiting for a turn boundary:
+
+```
+/guardian config set landing.auto_seal_from LAND        # the default
+/guardian config set landing.auto_seal_from EMERGENCY   # later, only at the edge
+/guardian config set landing.auto_seal_from HARD_STOPPED # effectively off
+```
+
+It fires from `PostToolUse`, after the tool call it has just recorded. That is deliberate: a
+seal runs git, which has no business on the synchronous gate in front of every tool call, and
+still less in the status-line sensor with its 2.4ms budget. Sensors write, actuators read.
+
+Three properties are worth knowing:
+
+- **Once per climb.** The latch is written to state *before* the seal, so a seal that fails
+  cannot retry itself on every subsequent tool call. It leaves a line in `guardian log`.
+- **It re-arms.** If the window refills and the mode drops back below the threshold, the
+  latch clears; a later climb seals again, this time carrying the work the first seal could
+  not have seen.
+- **A manual handoff counts.** If you have already run `/guardian handoff`, Guardian does not
+  seal on top of it — not until work is recorded after that seal, which is exactly when a
+  second one is worth having.
+
+The automatic seal announces itself and names the manifest. It does **not** pause anything:
+subagents still running are recorded as `IN_FLIGHT_AT_SEAL`, with whatever they wrote into
+`.claude/guardian/agent-notes/`, and they keep going.
+
 There is also a hard brake that halts the agentic loop at `EMERGENCY` once a handoff is
 sealed. It is **off by default** — an unexpected halt is worse than the problem for most
 people:
@@ -813,6 +845,7 @@ are equivalent.
   "landing": {
     "inject_from": "PREPARE",
     "force_seal_turn": true,
+    "auto_seal_from": "LAND",
     "halt_loop_at_emergency": false
   },
 
@@ -844,6 +877,7 @@ are equivalent.
 | `safe_boundary_commands` | Irreversible work to record as possibly-interrupted. Never blocked. |
 | `landing.inject_from` | Mode at which Guardian starts injecting a brief. `LAND` for a quieter tool. |
 | `landing.force_seal_turn` | Whether the `Stop` hook refuses one turn-end to force a seal. |
+| `landing.auto_seal_from` | Mode at which Guardian seals a handoff by itself, without waiting for the model or a turn boundary. `HARD_STOPPED` switches it off. |
 | `landing.halt_loop_at_emergency` | Hard brake on the agentic loop at `EMERGENCY`. Off by default. |
 | `statusline.chained_from` | Settings file the chained command is re-read from each tick, so a tool that manages its own status line keeps control of it. `init` sets it. |
 | `statusline.chain_timeout_ms` | How long the chained status line may take before Guardian gives up on it. Default 5000. A bar that builds a large index can need it. |
@@ -1107,6 +1141,13 @@ the recoverable commit is missing. `detail` in the manifest says which.
 It is at `LAND` or above with no handoff sealed, and it asks once. Record a next action and
 run `/guardian handoff`, or disable it with
 `/guardian config set landing.force_seal_turn false`.
+
+**Guardian sealed a handoff I did not ask for.**
+That is `landing.auto_seal_from`, which fires at `LAND` and above so a session cannot be lost
+waiting for a turn to end. The seal is additive — nothing is undone or paused by it, and the
+manifest is named in the message. Raise it with
+`/guardian config set landing.auto_seal_from EMERGENCY`, or switch it off with
+`HARD_STOPPED`.
 
 **Guardian is talking too much.**
 `/guardian config set landing.inject_from LAND` limits it to the landing protocol, or

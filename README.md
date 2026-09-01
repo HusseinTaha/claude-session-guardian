@@ -62,7 +62,7 @@ sits on a blocking path:
 | Hook | Does |
 |---|---|
 | `PreToolUse` (sync) | denies subagent spawns near a wall; annotates them just before |
-| `PostToolUse` (async) | records files, commands, commits — secrets redacted |
+| `PostToolUse` (async) | records files, commands, commits — secrets redacted; auto-seals at LAND+ |
 | `TaskCreated/Completed`, `SubagentStart/Stop` | task and agent ledgers, free |
 | `PreCompact` | seals a handoff before context goes lossy |
 | `PostCompact` | hands the digest straight back via `additionalContext` |
@@ -248,6 +248,12 @@ If the session tries to end at `LAND` or above with nothing sealed, the `Stop` h
 the turn-end **once** and asks for a next action and a handoff. A `Stop` hook that can fire
 twice is a loop and worse than no hook, so the latch is persisted before the refusal is
 returned, and the suite hammers it ten times to prove it.
+
+Asking is not sealing, though: that refusal needs a turn to actually end and a model to
+comply. So from `LAND` upward `PostToolUse` also seals **by itself** — after a tool call, off
+the blocking path, because a seal runs git. Once per climb, re-armed if the window refills and
+the mode falls back, and skipped while a handoff you sealed by hand is still the newest thing
+there is. `landing.auto_seal_from` sets the mode; `HARD_STOPPED` switches it off.
 
 When a 429 lands anyway, `StopFailure` reads the `quotaLimits` record the transcript leaves
 behind — the only place the exact reset timestamp survives — seals a handoff, and switches

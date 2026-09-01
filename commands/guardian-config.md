@@ -17,6 +17,8 @@ does. Common changes:
 /guardian-config set agents.deny_spawn_from HARD_STOPPED  never block subagents
 /guardian-config set landing.inject_from LAND           talk less
 /guardian-config set landing.force_seal_turn false      never refuse a turn-end
+/guardian-config set landing.auto_seal_from EMERGENCY   seal automatically later
+/guardian-config set landing.auto_seal_from HARD_STOPPED  never seal automatically
 /guardian-config set render.color false
 ```
 

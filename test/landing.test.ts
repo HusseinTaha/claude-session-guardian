@@ -374,3 +374,126 @@ test('forceSealInstruction names one action and no others', () => {
   assert.match(s, /Then stop\./);
   assert.doesNotMatch(s, /continue|carry on|keep going/i);
 });
+
+// ------------------------------------------------------------------ the auto-seal
+
+/** A completed Bash call: the async path Guardian seals from, and it leaves a ledger
+ *  event behind, which is what makes the work "newer than the last seal". */
+function toolCall(dir: string, sid: string, t: number, cmd = 'echo hi') {
+  const payload = { session_id: sid, cwd: dir, tool_name: 'Bash', tool_input: { command: cmd } };
+  return hook('PostToolUse', payload, t);
+}
+
+test('auto-seal fires once at LAND, without being asked and without a turn ending', () => {
+  const dir = tmp();
+  writeState(dir, stateAt('LAND'));
+
+  const r = toolCall(dir, 's1', T);
+  assert.match(r.out.systemMessage, /auto-sealed a handoff at LAND/);
+  assert.match(r.out.systemMessage, /latest\.json/, 'the message must name the manifest');
+  assert.match(readLatest(dir)!.seal_reason, /^auto-seal \(LAND\)$/);
+
+  const st = readState(dir, 's1');
+  assert.equal(st.latches.auto_sealed, true, 'the latch must be persisted');
+  assert.equal(st.manifest.sealed_at, T, 'the state must agree with the manifest on disk');
+});
+
+test('auto-seal is single-shot while the mode holds', () => {
+  const dir = tmp();
+  writeState(dir, stateAt('EMERGENCY'));
+  assert.ok(toolCall(dir, 's1', T).out.systemMessage);
+
+  for (let i = 1; i <= 10; i++) {
+    const again = toolCall(dir, 's1', T + i * 10);
+    assert.equal(again.out, null, `auto-seal fired again on tool call ${i + 1}`);
+  }
+  assert.equal(readLatest(dir)!.sealed_at, T, 'only the first seal should exist');
+});
+
+test('auto-seal re-arms when the mode falls back, and seals again on a later climb', () => {
+  const dir = tmp();
+  writeState(dir, stateAt('LAND'));
+  assert.ok(toolCall(dir, 's1', T).out.systemMessage);
+
+  // Recovered: the window refilled faster than the session burned it.
+  writeState(dir, { ...readState(dir, 's1'), mode: 'WATCH' });
+  assert.equal(toolCall(dir, 's1', T + 100).out, null);
+  const down = readState(dir, 's1');
+  assert.equal(down.latches.auto_sealed, false, 'the latch must clear on the way down');
+
+  writeState(dir, { ...readState(dir, 's1'), mode: 'LAND' });
+  const second = toolCall(dir, 's1', T + 200);
+  assert.ok(second.out?.systemMessage, 'a later climb must seal again');
+  assert.equal(readLatest(dir)!.sealed_at, T + 200, 'the second seal must supersede the first');
+});
+
+// The load-bearing constraint: sealing runs git. On the synchronous gate that would sit in
+// front of every tool call, and in the sensor it would blow a 2.4ms budget.
+test('auto-seal never fires from a synchronous hook', () => {
+  const dir = tmp();
+  writeState(dir, stateAt('EMERGENCY'));
+
+  const gate = hook(
+    'PreToolUse',
+    { session_id: 's1', cwd: dir, tool_name: 'Bash', tool_input: { command: 'echo hi' } },
+    T,
+  );
+  assert.equal(gate.exit, 0);
+  assert.equal(readLatest(dir), null, 'PreToolUse must not seal');
+  assert.equal(readState(dir, 's1').latches.auto_sealed, undefined);
+});
+
+test('auto-seal stays quiet below the configured mode', () => {
+  const dir = tmp();
+  for (const m of ['NORMAL', 'WATCH', 'PREPARE'] as Mode[]) {
+    writeState(dir, { ...stateAt(m), session_id: `sess-${m}` });
+    assert.equal(toolCall(dir, `sess-${m}`, T).out, null, m);
+    assert.equal(readLatest(dir), null, m);
+  }
+});
+
+test('auto-seal counts a handoff sealed by hand, until there is newer work to seal', () => {
+  const dir = tmp();
+  seal(dir, 's1', stateAt('LAND'), 'manual', T - 10, { git: false });
+  writeState(dir, { ...stateAt('LAND'), manifest: { sealed_at: T - 10 } });
+
+  // A tool call that records nothing: no work has happened since the manual seal.
+  assert.equal(hook('PostToolUse', { session_id: 's1', cwd: dir, tool_name: 'Read' }, T).out, null);
+  assert.equal(readLatest(dir)!.seal_reason, 'manual');
+  assert.equal(readState(dir, 's1').latches.auto_sealed, undefined, 'still armed, not latched');
+
+  // Work after the seal is exactly what the automatic one is for.
+  assert.ok(toolCall(dir, 's1', T + 5).out?.systemMessage);
+  assert.match(readLatest(dir)!.seal_reason, /^auto-seal/);
+});
+
+test('the mode auto-seal fires at is configurable, and HARD_STOPPED switches it off', () => {
+  const dir = tmp();
+  writeFileSync(configPath(dir), JSON.stringify({ landing: { auto_seal_from: 'EMERGENCY' } }));
+
+  writeState(dir, { ...stateAt('LAND'), session_id: 'a' });
+  assert.equal(toolCall(dir, 'a', T).out, null, 'LAND is below the configured mode');
+
+  writeState(dir, { ...stateAt('EMERGENCY'), session_id: 'b' });
+  assert.ok(toolCall(dir, 'b', T + 10).out?.systemMessage);
+
+  writeFileSync(configPath(dir), JSON.stringify({ landing: { auto_seal_from: 'HARD_STOPPED' } }));
+  writeState(dir, { ...stateAt('EMERGENCY'), session_id: 'c' });
+  assert.equal(toolCall(dir, 'c', T + 20).out, null, 'HARD_STOPPED is the off switch');
+});
+
+test('a failed auto-seal is not retried on every tool call after it', () => {
+  const dir = tmp();
+  writeState(dir, stateAt('LAND'));
+  // A directory where the manifest should go: every write path through seal() throws.
+  mkdirSync(join(dir, '.claude', 'guardian', 'handoff', 'latest.json'), { recursive: true });
+
+  for (let i = 0; i < 3; i++) {
+    const r = toolCall(dir, 's1', T + i * 10);
+    assert.equal(r.exit, 0, 'a broken seal must still fail open');
+    assert.equal(r.out, null);
+  }
+  const st = readState(dir, 's1');
+  // The latch is written before the seal, precisely so a broken seal cannot storm.
+  assert.equal(st.latches.auto_sealed, true, 'the latch must be set even when the seal fails');
+});
