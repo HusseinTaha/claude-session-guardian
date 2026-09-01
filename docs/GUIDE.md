@@ -105,6 +105,28 @@ would have expanded them, which `cmd.exe` cannot do on its own.
 Run it from anywhere inside the project, or as `/guardian init`. It is idempotent, and
 `guardian uninstall` undoes whichever layer it wrote.
 
+### Getting a bare `/guardian`
+
+Plugin commands are namespaced by plugin name, so the one this plugin ships is
+`/claude-session-guardian:guardian` — correct, and nobody wants to type it. A user-level
+command shadows it with the short form, in every project:
+
+```bash
+mkdir -p ~/.claude/commands
+cp commands/guardian.md ~/.claude/commands/guardian.md
+```
+
+Then change its one invocation line from the plugin form to the binary on PATH, since
+`CLAUDE_PLUGIN_ROOT` is only set for a plugin's own commands:
+
+```diff
+-!`node "${CLAUDE_PLUGIN_ROOT}/dist/guardian.cjs" ${ARGUMENTS:-status}`
++!`guardian ${ARGUMENTS:-status}`
+```
+
+Also swap `allowed-tools: Bash(node:*)` for `Bash(guardian:*)`. Restart, and `/guardian
+status`, `/guardian init`, `/guardian handoff` all work unqualified.
+
 To remove everything:
 
 ```bash
