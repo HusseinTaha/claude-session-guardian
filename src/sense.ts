@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process';
 import { AXES, type AxisName, type AxisState, type GuardianConfig, type GuardianState, type Sample, type StatusLinePayload } from './types.ts';
 import { loadConfig } from './config.ts';
+import { resolveStateRoot } from './paths.ts';
 import { readState, writeState } from './state.ts';
 import { recordSample, rawBurnRate, smooth } from './burn.ts';
 import { axisMode, decide, timeToWall } from './mode.ts';
@@ -8,7 +9,10 @@ import { renderStatus } from './render.ts';
 import { log } from './log.ts';
 
 export function resolveProjectDir(p: StatusLinePayload): string {
-  return p.workspace?.project_dir || p.workspace?.current_dir || p.cwd || process.cwd();
+  const start = p.workspace?.project_dir || p.workspace?.current_dir || p.cwd || process.cwd();
+  // Run it through the same root resolution the hooks use, so the sensor and the
+  // actuators never end up writing to two different state directories.
+  return resolveStateRoot(start);
 }
 
 /** Percentages arrive as `number | null | undefined` depending on how early in the session

@@ -76,7 +76,7 @@ export interface GuardianState {
   /** Bounded ring of recent observations, oldest first. */
   samples: Sample[];
   /** Latches that must fire at most once per session. */
-  latches: { stop_forced?: boolean };
+  latches: { stop_forced?: boolean; resume_offered?: boolean };
   manifest: { sealed_at: number | null };
 }
 

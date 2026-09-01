@@ -1,7 +1,7 @@
-import { readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { GuardianState } from './types.ts';
-import { statePath } from './paths.ts';
+import { statePath, ensureGuardianDir } from './paths.ts';
 
 export function emptyState(sessionId: string): GuardianState {
   return {
@@ -50,7 +50,7 @@ export function readState(projectDir: string, sessionId: string): GuardianState 
 export function writeState(projectDir: string, state: GuardianState): void {
   const p = statePath(projectDir, state.session_id);
   const tmp = `${p}.${process.pid}.tmp`;
-  mkdirSync(dirname(p), { recursive: true });
+  ensureGuardianDir(projectDir, dirname(p));
   writeFileSync(tmp, JSON.stringify(state, replacer, 2));
   try {
     renameSync(tmp, p);

@@ -3,8 +3,11 @@
 Sees every Claude Code exhaustion wall coming **with time-to-impact**, not just a percentage,
 and lands the session before it hits.
 
-> Status: **Phase 1 complete** — sensor, time-to-wall engine, status line, install/uninstall.
-> Phases 2–5 (continuity, agent safety, landing protocol, `doctor`) are specified but not built.
+> Status: **Phases 1–2 complete** — sensor and time-to-wall engine; observation ledger,
+> handoff manifest, lossless compaction, resume with workspace verification, git checkpoints.
+> Phases 3–5 (agent safety, landing protocol, `doctor`) are specified but not built.
+>
+> **[Full user guide with examples →](docs/GUIDE.md)**
 
 ## The problem
 
@@ -51,8 +54,44 @@ The `statusLine` command already receives everything needed on stdin —
 `rate_limits.seven_day`, `cost` — and re-runs on every session event. That is the sensor.
 It recomputes burn rates and mode, writes a small `state.json`, and prints the bar.
 
-Hooks are the actuators (Phases 2–4): they read that pre-computed state and act, so the
-analysis never sits on a blocking path.
+Hooks are the actuators. They read that pre-computed state and act, so the analysis never
+sits on a blocking path:
+
+| Hook | Does |
+|---|---|
+| `PostToolUse` (async) | records files, commands, commits — secrets redacted |
+| `TaskCreated/Completed`, `SubagentStart/Stop` | task and agent ledgers, free |
+| `PreCompact` | seals a handoff before context goes lossy |
+| `PostCompact` | hands the digest straight back via `additionalContext` |
+| `UserPromptSubmit` | offers a previous session's handoff, once |
+| `SessionEnd` | last-chance seal (no git checkpoint — 1.5s shared budget) |
+
+## Continuity
+
+**Compaction stops being amnesia.** Seal on the way in, re-inject the digest on the way
+out. This fires several times a day regardless of rate limits, so it pays off even in
+sessions that never approach a wall.
+
+**The manifest is observed, not composed.** The design this grew from had Claude author a
+reflective summary at 95% usage — exactly when there is no budget left to reflect. Here the
+hooks record files, commits, tasks, tests and agents as the session runs; only intent
+(`--next`, `--objective`) needs the model, and that is two lines.
+
+**Resume is verified, not assumed.** Every file carries a SHA-256, so a resuming session can
+prove the work is still there:
+
+```
+## Workspace verification
+- 13 file(s) unchanged since the handoff
+- CHANGED since the handoff (someone edited these outside it):
+    src/auth.ts
+- git HEAD is unchanged since the handoff
+```
+
+**Git checkpoints stay out of your way.** Guardian captures the working tree — uncommitted
+and untracked files included — as a real commit under `refs/guardian/<session>/<stamp>`,
+written through a throwaway index. `HEAD`, the index and the worktree are untouched, `git
+log` never shows it, `.gitignore` is honoured, and `uninstall` deletes every ref.
 
 ## Install
 
@@ -122,7 +161,11 @@ state directory, a missing config. The suite asserts this rather than assuming i
 **Stay cheap.** The sensor runs on every session event. Measured p50 **4.4 ms**, p95
 **7.3 ms** of compute (≈65 ms wall clock per invocation on Windows, dominated by Node's
 cold start, which Guardian cannot optimise away). No git calls, no network, no directory
-walks on the hot path.
+walks on the hot path. Observation hooks are `async`, so a tool call never waits.
+
+**Never store a secret.** Recorded commands pass through a redaction pass first — token
+shapes, `KEY=value`, `Authorization:` headers, URL credentials. The digest is injected back
+into a context window, and context windows end up in transcripts.
 
 **Windows first.** Node-only, no shell scripts, forward slashes everywhere — backslashes in
 a configured command get consumed as escapes before the script runs.
@@ -133,7 +176,7 @@ it holds prompts and paths and does not belong in a commit.
 ## Development
 
 ```bash
-npm run check      # typecheck + build + 55 tests
+npm run check      # typecheck + build + 99 tests
 ```
 
 `GUARDIAN_NOW=<epoch>` replays a session at its original timestamps, which is how the mode
@@ -148,4 +191,9 @@ src/sense.ts    the statusLine sensor (pure core + I/O shell)
 src/state.ts    atomic, Infinity-safe state persistence
 src/install.ts  status line install with chaining
 src/render.ts   status bar and dashboard
+src/hooks.ts    hook dispatch: observation in, continuity out
+src/ledger.ts   append-only observation log
+src/manifest.ts manifest build, seal, digest, verification
+src/git.ts      out-of-band checkpoint refs
+src/redact.ts   secret redaction for recorded commands
 ```

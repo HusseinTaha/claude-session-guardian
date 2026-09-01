@@ -4,6 +4,7 @@ import { computeState, sampleFrom, resolveProjectDir } from '../src/sense.ts';
 import { emptyState } from '../src/state.ts';
 import { DEFAULT_CONFIG } from '../src/config.ts';
 import { renderStatus } from '../src/render.ts';
+import { resolve } from 'node:path';
 import type { GuardianState, StatusLinePayload } from '../src/types.ts';
 
 const cfg = DEFAULT_CONFIG;
@@ -121,11 +122,12 @@ test('a recorded hard stop outranks the gauges until the window reopens', () => 
 });
 
 test('resolveProjectDir prefers the project dir over the current one', () => {
+  // Compared after resolve(), since the result is absolute and platform-shaped.
   assert.equal(
     resolveProjectDir({ workspace: { project_dir: '/a', current_dir: '/a/sub' }, cwd: '/b' }),
-    '/a',
+    resolve('/a'),
   );
-  assert.equal(resolveProjectDir({ cwd: '/b' }), '/b');
+  assert.equal(resolveProjectDir({ cwd: '/b' }), resolve('/b'));
 });
 
 test('the status bar stays short and shows the clock only when there is one', () => {

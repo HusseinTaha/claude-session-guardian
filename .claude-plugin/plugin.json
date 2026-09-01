@@ -1,9 +1,17 @@
 {
   "name": "claude-session-guardian",
   "displayName": "Claude Session Guardian",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Sees every exhaustion wall coming with time-to-impact, not just a percentage, and lands the session before it hits.",
   "license": "MIT",
-  "keywords": ["rate-limit", "context-window", "handoff", "continuity"],
-  "commands": ["./commands/guardian.md"]
+  "keywords": [
+    "rate-limit",
+    "context-window",
+    "handoff",
+    "continuity"
+  ],
+  "commands": [
+    "./commands/guardian.md"
+  ],
+  "hooks": "./hooks/hooks.json"
 }
