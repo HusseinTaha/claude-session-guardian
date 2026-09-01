@@ -79,6 +79,8 @@ export interface GuardianState {
   samples: Sample[];
   /** Latches that must fire at most once per session. */
   latches: { stop_forced?: boolean; resume_offered?: boolean };
+  /** Set when a 429 has been observed, with the epoch second the window reopens. */
+  hard_stop: { at: number; kind: string; resets_at: number | null } | null;
   manifest: { sealed_at: number | null };
 }
 
@@ -99,6 +101,15 @@ export interface GuardianConfig {
   };
   /** Glob patterns for irreversible, long-running shell work. Recorded, never blocked. */
   safe_boundary_commands: string[];
+  landing: {
+    /** Mode at which Guardian starts injecting a brief into the conversation. */
+    inject_from: Mode;
+    /** Let the Stop hook refuse one turn-end to force a seal. Single-shot per session. */
+    force_seal_turn: boolean;
+    /** Halt the agentic loop at EMERGENCY once a handoff is sealed. Off by default: an
+     *  unexpected halt is worse than the problem for most users. */
+    halt_loop_at_emergency: boolean;
+  };
   statusline: { manage: boolean; chain_existing: boolean; chained_command: string | null };
   burn: {
     window_min: number;

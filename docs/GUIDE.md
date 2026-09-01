@@ -13,6 +13,8 @@ close, it seals a handoff so the next session can pick the work up exactly where
 - [Subagents near a wall](#subagents-near-a-wall)
 - [Recording what cannot be observed](#recording-what-cannot-be-observed)
 - [Git checkpoints](#git-checkpoints)
+- [When Guardian speaks](#when-guardian-speaks)
+- [When a rate limit hits anyway](#when-a-rate-limit-hits-anyway)
 - [Configuration](#configuration)
 - [Command reference](#command-reference)
 - [Troubleshooting](#troubleshooting)
@@ -492,7 +494,184 @@ in the manifest.
 
 ---
 
+## When Guardian speaks
+
+Guardian is silent below `PREPARE`. The status line is there for anyone looking; injecting
+text into the conversation costs the budget it exists to protect. Above that, what it says
+grows with severity and nothing more.
+
+**At PREPARE** — one line, about forty tokens:
+
+```
+[Guardian: PREPARE — 5-hour: 83% used, ~12m to wall, resets in 3.6h] Do not begin
+work that cannot reach a reportable state in that window. Prefer finishing what is
+open.
+```
+
+**At LAND** — the landing protocol, about two hundred tokens:
+
+```
+[Guardian: LAND — 5-hour: 96% used, ~4m to wall, resets in 3.6h]
+
+Land the work. In this order:
+1. Bring the current operation to a stopping point. Do not start another.
+2. Record what cannot be observed from the files:
+   `claude-guardian note --next "<the single most specific next step>"`
+   Add `--gotcha` or `--decision` for anything a fresh session would get wrong.
+3. Seal it: `/guardian handoff`.
+
+Guardian already has the files, commands, commits, tasks and tests. What it cannot
+see is intent, so the note is the part that matters. New subagents are blocked;
+do small remaining work inline.
+```
+
+**At EMERGENCY** — two commands and a full stop.
+
+The deeper checklist lives in a `guardian-protocol` skill, which loads only when it is
+needed rather than sitting in every prompt.
+
+### The Stop brake
+
+If the session tries to end at `LAND` or above with **no handoff sealed**, Guardian refuses
+the turn-end once and asks for exactly one thing:
+
+```
+Session Guardian is in LAND (5-hour: 96% used, ~4m to wall) and no handoff has been
+sealed. Before stopping, do exactly this and nothing more: record the next action
+with `claude-guardian note --next "..."`, then run `claude-guardian handoff
+--reason "LAND"`. Then stop.
+```
+
+**It fires at most once per session.** A `Stop` hook that can fire twice is a loop, and a
+loop there would be worse than having no hook at all, so the latch is written to disk before
+the refusal is returned. The test suite hammers it ten times in a row to prove it.
+
+Turn it off with:
+
+```
+/guardian config set landing.force_seal_turn false
+```
+
+There is also a hard brake that halts the agentic loop at `EMERGENCY` once a handoff is
+sealed. It is **off by default** — an unexpected halt is worse than the problem for most
+people:
+
+```
+/guardian config set landing.halt_loop_at_emergency true
+```
+
+---
+
+## When a rate limit hits anyway
+
+Sometimes the wall arrives faster than any warning. Guardian handles the aftermath.
+
+The moment a turn ends in a 429, Guardian reads the `quotaLimits` record the transcript
+leaves behind — which carries the exact reset timestamp no live gauge can supply after the
+fact — seals a handoff, and switches to `HARD_STOPPED`.
+
+Your next prompt gets:
+
+```
+[Guardian: HARD_STOPPED] A rate limit (five_hour) refused a request. The window
+reopens at 2026-09-01 12:30 UTC — nothing will succeed before then. A handoff has
+been sealed; run `/guardian wait` for a countdown, and `/guardian resume` once the
+window reopens. Do not retry in the meantime.
+```
+
+```
+$ /guardian wait
+Rate limit: five_hour
+Refused at: 2026-09-01 11:00:00.000Z
+Reopens at: 2026-09-01 12:30:00.000Z
+Status:     80m until the window reopens
+
+The work is sealed. Run /guardian resume once the window reopens.
+```
+
+The point of `Do not retry` is that a retry cannot succeed, and each attempt spends a turn
+finding that out.
+
 ## Configuration
+
+Everything is configurable from the `/guardian` command. Nothing needs hand-editing.
+
+```
+/guardian config                              list every setting, its value, and what it does
+/guardian config set thresholds_minutes.land 8
+/guardian config set agents.deny_spawn_from EMERGENCY
+/guardian config set thresholds_minutes.prepare 20 thresholds_minutes.land 10
+/guardian config get thresholds_minutes.land
+/guardian config unset thresholds_minutes.land      back to the default
+/guardian config reset                              remove all overrides
+/guardian config check                              validate the current file
+/guardian off                                       silent, but still installed
+/guardian on
+```
+
+The listing marks what you have changed:
+
+```
+$ /guardian config
+
+Guardian settings for C:\proj
+  file: C:\proj\.claude\guardian\config.json
+
+  enabled                              true             master switch; false makes Guardian silent
+  thresholds_minutes.watch             30               minutes-to-wall at which the bar turns amber
+  thresholds_minutes.prepare           12               minutes-to-wall at which to stop starting new work
+  thresholds_minutes.land              8          set   minutes-to-wall at which spawns are denied
+  thresholds_minutes.emergency         1.5              minutes-to-wall treated as the wall being here
+  ...
+```
+
+`set` validates before writing, and refuses anything that would not work:
+
+```
+$ /guardian config set thresholds_minutes.land 40
+error: thresholds_minutes.land — must be <= thresholds_minutes.prepare (12); otherwise
+PREPARE can never be reached before LAND
+
+Nothing was written.
+
+$ /guardian config set render.color banana
+error: render.color — must be true or false
+
+$ /guardian config set thresholds_minute.land 5
+error: thresholds_minute.land — unknown setting "thresholds_minute.land"
+```
+
+That last one is the reason to use the CLI rather than the file: a typo'd key in
+`config.json` is silently ignored, and you would never know your setting had no effect.
+
+You can also just describe what you want — "warn me earlier", "stop blocking my subagents",
+"turn off the colours" — and Claude will map it to the right setting.
+
+### The command menu
+
+Type `/guardian` and the palette lists every Guardian command. Arrow between them, press
+Enter, then keep typing the arguments:
+
+```
+/guardian              Session Guardian - usage status, handoff, resume, and configuration
+/guardian-status       how much session budget is left, and how long until the wall
+/guardian-config       list settings, or change one (thresholds, agent gate, colours)
+/guardian-handoff      seal a resumable handoff of this session's work right now
+/guardian-resume       load the last sealed handoff and verify the workspace against it
+/guardian-wait         when does the rate-limit window reopen after a 429
+/guardian-agents       live subagents, their context use, and typical run times
+```
+
+Each shows its expected arguments once selected, so `/guardian-config` displays
+`[set <setting> <value> | get <setting> | unset <setting> | reset | check]`.
+
+One honest limitation: Claude Code has no arrow-navigable picker for *argument* values —
+`argument-hint` is a display hint, not a menu. The navigable list is the command list, which
+is why each subcommand is its own entry rather than an argument to one command. Everything
+still works as an argument too, so `/guardian config set ...` and `/guardian-config set ...`
+are equivalent.
+
+### The file
 
 `.claude/guardian/config.json`, merged over the defaults. Everything is optional.
 
@@ -521,6 +700,12 @@ in the manifest.
     "min_samples": 3
   },
 
+  "landing": {
+    "inject_from": "PREPARE",
+    "force_seal_turn": true,
+    "halt_loop_at_emergency": false
+  },
+
   "statusline": { "manage": true, "chain_existing": true, "chained_command": null },
   "render": { "bar_width": 10, "color": true }
 }
@@ -539,6 +724,9 @@ in the manifest.
 | `agents.deny_spawn_from` | Mode at which new subagents are refused. `HARD_STOPPED` disables the gate. |
 | `agents.inject_checkpoint_prompt_from` | Mode at which spawned agents get the self-checkpointing note. |
 | `safe_boundary_commands` | Irreversible work to record as possibly-interrupted. Never blocked. |
+| `landing.inject_from` | Mode at which Guardian starts injecting a brief. `LAND` for a quieter tool. |
+| `landing.force_seal_turn` | Whether the `Stop` hook refuses one turn-end to force a seal. |
+| `landing.halt_loop_at_emergency` | Hard brake on the agentic loop at `EMERGENCY`. Off by default. |
 | `render.color` | Set `false` for a terminal that mangles ANSI. |
 | `enabled` | `false` makes Guardian completely silent while leaving it installed. |
 
@@ -560,6 +748,9 @@ echo '{ "enabled": false }' > .claude/guardian/config.json
 | `/guardian verify` | Check the manifest against the workspace without consuming it |
 | `/guardian install` / `uninstall` | Set up or remove the status line |
 | `claude-guardian note --objective\|--next\|--decision\|--gotcha <text>` | Record intent |
+| `/guardian wait` | Countdown to a rate-limit window reopening |
+| `/guardian config [get\|set\|unset\|reset\|check\|path]` | Read and change settings, validated |
+| `/guardian on` / `off` | Enable or disable Guardian for this project |
 | `claude-guardian agents` | Live subagents, plus historical duration by agent type |
 | `claude-guardian checkpoints` | List git checkpoint refs |
 | `claude-guardian where` | Print the command `install` configures |
@@ -624,6 +815,15 @@ after the first one finishes.
 Not a git repository, or git plumbing failed. The manifest still carries file hashes; only
 the recoverable commit is missing. `detail` in the manifest says which.
 
+**Guardian will not let the turn end.**
+It is at `LAND` or above with no handoff sealed, and it asks once. Record a next action and
+run `/guardian handoff`, or disable it with
+`/guardian config set landing.force_seal_turn false`.
+
+**Guardian is talking too much.**
+`/guardian config set landing.inject_from LAND` limits it to the landing protocol, or
+`/guardian off` silences it entirely while leaving it installed.
+
 **Something is wrong and I want the log.**
 `.claude/guardian/logs/guardian.log`. It is empty unless something threw — every hook
 fails open, so failures are silent by design.
@@ -648,11 +848,16 @@ the session dies is still lost — Guardian records that it was running, and not
 fresh session rebuilds understanding from those, which is more reliable than trying to
 freeze a context window.
 
-**It stops exactly one thing.** New subagent spawns, at `LAND` and above, and only because
-a delegation is the one action whose partial results cannot be recovered. Everything else —
-edits, reads, searches, shell commands, migrations — passes through untouched at every mode.
-Guardian tells you the truth about your budget and makes the aftermath survivable; the rest
-of the decisions stay yours.
+**It stops two things, both narrowly.** New subagent spawns at `LAND` and above, because a
+delegation is the one action whose partial results cannot be recovered; and one turn-end,
+once per session, when nothing has been sealed. Everything else — edits, reads, searches,
+shell commands, migrations — passes through untouched at every mode. Both brakes are
+switchable, and the message always names the setting that lifts them.
+
+**It cannot predict a sudden 429.** If a limit is consumed faster than the burn rate implies
+— another session on the same account, a fan-out landing all at once — the wall can arrive
+with no warning. Guardian handles the aftermath (seal, `HARD_STOPPED`, reset countdown) but
+makes no claim to have seen it coming.
 
 **It cannot see account usage your plan does not report.** There is exactly one live feed
 for rate limits, and if your plan omits it, Guardian says `unknown` rather than guessing.

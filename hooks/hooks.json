@@ -25,6 +25,17 @@
         "matcher": "Edit|Write|MultiEdit|NotebookEdit|Bash|PowerShell"
       }
     ],
+    "PostToolBatch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/guardian.cjs\" hook PostToolBatch",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "TaskCreated": [
       {
         "hooks": [
@@ -98,6 +109,28 @@
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/guardian.cjs\" hook UserPromptSubmit",
             "timeout": 10
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/guardian.cjs\" hook Stop",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/dist/guardian.cjs\" hook StopFailure",
+            "timeout": 15
           }
         ]
       }

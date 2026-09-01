@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { sense } from './sense.ts';
 import { senseAgents } from './senseAgents.ts';
@@ -18,7 +18,22 @@ import {
   latestPath,
 } from './manifest.ts';
 import { removeCheckpoints, listCheckpoints } from './git.ts';
+import { countdown } from './landing.ts';
 import { readAgents, typeStats } from './agents.ts';
+import {
+  flatten,
+  getPath,
+  setPath,
+  unsetPath,
+  coerceValue,
+  validateConfig,
+  readUserConfig,
+  writeUserConfig,
+  deleteUserConfig,
+  HELP,
+} from './configCmd.ts';
+import { configPath } from './paths.ts';
+import { DEFAULT_CONFIG } from './config.ts';
 import { fmtMin } from './mode.ts';
 
 function readStdin(): string {
@@ -79,9 +94,21 @@ Handoff
            [--no-git]
   resume                   print the sealed handoff plus workspace verification,
                            and mark it consumed
+  wait                     countdown to a rate-limit window reopening
   verify                   check the sealed manifest against the workspace
   note --objective|--next|--decision|--gotcha <text>
                            record what cannot be observed, for the next session
+
+Configuration
+  config                   list every setting, its value, and whether it is overridden
+  config get <setting>     print one value
+  config set <setting> <value> [...]
+                           change one or more settings, validated before writing
+  config unset <setting>   return a setting to its default
+  config reset             remove all overrides
+  config check             validate the current config file
+  config path              print the config file path
+  on | off                 enable or disable Guardian for this project
 
 Setup
   install [--settings P]   point statusLine at Guardian, preserving any existing one
@@ -146,6 +173,139 @@ function cmdResume(projectDir: string, out: (s: string) => void): number {
   return 0;
 }
 
+
+/** `guardian config` and its subcommands.
+ *
+ *  Settings are typed from the defaults rather than a separate schema, so a new option is
+ *  configurable the moment it has a default and the two can never drift apart. */
+function cmdConfig(projectDir: string, argv: string[], out: (s: string) => void): number {
+  const sub = argv[1] ?? 'show';
+  const file = configPath(projectDir);
+
+  const report = (user: Record<string, unknown>): number => {
+    const problems = validateConfig(user);
+    for (const p of problems) {
+      out(`${p.severity === 'error' ? 'error' : 'warning'}: ${p.path} — ${p.message}\n`);
+    }
+    return problems.some((p) => p.severity === 'error') ? 1 : 0;
+  };
+
+  switch (sub) {
+    case 'show': {
+      const user = readUserConfig(projectDir);
+      const effective = loadConfig(projectDir);
+      out(`Guardian settings for ${projectDir}\n`);
+      out(`  file: ${file}${existsSync(file) ? '' : ' (none yet; showing defaults)'}\n\n`);
+      let section = '';
+      for (const [path, value] of flatten(effective)) {
+        const top = path.split('.')[0]!;
+        if (top !== section) {
+          out(`\n`);
+          section = top;
+        }
+        const overridden = getPath(user, path) !== undefined;
+        const shown = JSON.stringify(value);
+        const help = HELP[path] ?? '';
+        out(
+          `  ${path.padEnd(38)} ${shown.padEnd(14)} ${overridden ? 'set  ' : '     '} ${help}\n`,
+        );
+      }
+      out(`\nChange one with:  /guardian config set <setting> <value>\n`);
+      return report(user);
+    }
+
+    case 'get': {
+      const path = argv[2];
+      if (!path) {
+        out('Usage: /guardian config get <setting>\n');
+        return 1;
+      }
+      const v = getPath(loadConfig(projectDir), path);
+      if (v === undefined) {
+        out(`Unknown setting "${path}". Run /guardian config to list them.\n`);
+        return 1;
+      }
+      out(`${JSON.stringify(v)}\n`);
+      return 0;
+    }
+
+    case 'set': {
+      const pairs = argv.slice(2);
+      if (!pairs.length || pairs.length % 2 !== 0) {
+        out('Usage: /guardian config set <setting> <value> [<setting> <value> ...]\n');
+        return 1;
+      }
+      let user = readUserConfig(projectDir);
+      const applied: string[] = [];
+      for (let i = 0; i < pairs.length; i += 2) {
+        const path = pairs[i]!;
+        const raw = pairs[i + 1]!;
+        const c = coerceValue(path, raw);
+        if (!c.ok) {
+          out(`error: ${path} — ${c.error}\n`);
+          return 1;
+        }
+        user = setPath(user, path, c.value);
+        applied.push(`${path} = ${JSON.stringify(c.value)}`);
+      }
+      // Validate the whole result before writing: a valid pair can still produce an
+      // invalid configuration, such as land above prepare.
+      const problems = validateConfig(user);
+      const errors = problems.filter((p) => p.severity === 'error');
+      if (errors.length) {
+        for (const p of errors) out(`error: ${p.path} — ${p.message}\n`);
+        out('\nNothing was written.\n');
+        return 1;
+      }
+      writeUserConfig(projectDir, user);
+      for (const a of applied) out(`set ${a}\n`);
+      for (const p of problems) out(`warning: ${p.path} — ${p.message}\n`);
+      out(`\n${file}\n`);
+      if (applied.some((a) => a.startsWith('statusline.') || a.startsWith('render.'))) {
+        out('Status line changes appear on the next tick.\n');
+      }
+      return 0;
+    }
+
+    case 'unset': {
+      const path = argv[2];
+      if (!path) {
+        out('Usage: /guardian config unset <setting>\n');
+        return 1;
+      }
+      const user = readUserConfig(projectDir);
+      if (getPath(user, path) === undefined) {
+        out(`"${path}" is not overridden; it is already at its default.\n`);
+        return 0;
+      }
+      writeUserConfig(projectDir, unsetPath(user, path));
+      out(`unset ${path} — back to default ${JSON.stringify(getPath(DEFAULT_CONFIG, path))}\n`);
+      return 0;
+    }
+
+    case 'reset': {
+      out(
+        deleteUserConfig(projectDir)
+          ? `Removed ${file}. Every setting is back to its default.\n`
+          : 'No overrides to remove; everything is already at its defaults.\n',
+      );
+      return 0;
+    }
+
+    case 'check':
+      return report(readUserConfig(projectDir));
+
+    case 'path':
+      out(`${file}\n`);
+      return 0;
+
+    default:
+      out(`Unknown config subcommand "${sub}".\n`);
+      out('Try: show, get, set, unset, reset, check, path\n');
+      return 1;
+  }
+}
+
 function main(argv: string[]): number {
   const cmd = argv[0] ?? 'help';
   const out = (s: string) => process.stdout.write(s);
@@ -167,6 +327,8 @@ function main(argv: string[]): number {
       const event = argv[1] ?? '';
       const r = handle(event, readStdin(), now());
       if (r.stdout) out(r.stdout);
+      // Exit 2 is how a hook blocks, and stderr is what Claude is shown when it does.
+      if (r.stderr) process.stderr.write(r.stderr);
       return r.exit;
     }
 
@@ -201,6 +363,40 @@ function main(argv: string[]): number {
         out('\nNo next action recorded. Add one so the next session does not have to guess:\n');
         out('  claude-guardian note --next "<the single most specific next step>"\n');
       }
+      return 0;
+    }
+
+    case 'config':
+      return cmdConfig(projectDir, argv, out);
+
+    // The two switches worth having as one word each.
+    case 'on':
+    case 'off': {
+      const enabled = cmd === 'on';
+      writeUserConfig(projectDir, setPath(readUserConfig(projectDir), 'enabled', enabled));
+      out(`Guardian ${enabled ? 'enabled' : 'disabled'} for this project.\n`);
+      if (!enabled) out('The status line stays installed but says nothing.\n');
+      return 0;
+    }
+
+    case 'wait': {
+      const sid = latestSession(projectDir);
+      const st = sid ? readState(projectDir, sid) : null;
+      const hs = st?.hard_stop ?? null;
+      if (!hs) {
+        out('No rate-limit stop recorded for this project.\n');
+        return 0;
+      }
+      const t = now();
+      out(`Rate limit: ${hs.kind}\n`);
+      out(`Refused at: ${new Date(hs.at * 1000).toISOString()}\n`);
+      if (hs.resets_at) {
+        out(`Reopens at: ${new Date(hs.resets_at * 1000).toISOString()}\n`);
+        out(`Status:     ${countdown(hs.resets_at, t)}\n`);
+      } else {
+        out('Reopens at: unknown (the transcript did not record it)\n');
+      }
+      out('\nThe work is sealed. Run /guardian resume once the window reopens.\n');
       return 0;
     }
 

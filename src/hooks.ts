@@ -7,6 +7,13 @@ import { appendEvent, fileEvent, commandEvent, classifyCommand } from './ledger.
 import { seal, hasUnconsumed, latestDigestPath, readLatest } from './manifest.ts';
 import { gateSpawn, markBoundary } from './gate.ts';
 import { readAgents, writeAgents, recordDuration } from './agents.ts';
+import {
+  injectionFor,
+  forceSealInstruction,
+  parseRateLimitTombstone,
+  isRateLimitError,
+} from './landing.ts';
+import { severity } from './mode.ts';
 import { log } from './log.ts';
 
 /** Fields Guardian reads from a hook payload. Every hook receives the common set
@@ -34,6 +41,13 @@ export interface HookInput {
   // Prompt events
   prompt?: string;
   source?: string;
+  // Stop / StopFailure
+  last_assistant_message_stop?: string;
+  stop_reason?: string;
+  error_type?: string;
+  error_message?: string;
+  // PostToolBatch
+  tool_calls?: unknown[];
 }
 
 /** Only the output fields Guardian actually uses. Which of these a given event honours
@@ -48,6 +62,8 @@ export interface HookOutput {
 export interface HookResult {
   stdout: string;
   exit: number;
+  /** Shown to Claude when exit is 2. */
+  stderr?: string;
 }
 
 const NOTHING: HookResult = { stdout: '', exit: 0 };
@@ -183,21 +199,33 @@ function onSessionEnd(inp: HookInput, projectDir: string, sid: string, now: numb
   return NOTHING;
 }
 
-/** The one place Guardian can put text into a fresh session's context. Offers the handoff
- *  rather than applying it: silently resuming days-old work would be worse than the
- *  problem it solves. */
+/** The one place Guardian can put text into a fresh session's context.
+ *
+ *  Two jobs: offer a previous session's handoff (once), and inject the mode-appropriate
+ *  brief (every prompt, while the mode warrants it). `SessionStart` cannot do the first —
+ *  it accepts `systemMessage` but not `additionalContext` — which is why both ride here. */
 function onUserPromptSubmit(projectDir: string, sid: string, now: number): HookResult {
+  const cfg = loadConfig(projectDir);
   const state = readState(projectDir, sid);
-  if (state.latches.resume_offered) return NOTHING;
+  const parts: string[] = [];
 
-  const m = hasUnconsumed(projectDir);
-  writeState(projectDir, {
-    ...state,
-    session_id: sid,
-    latches: { ...state.latches, resume_offered: true },
-  });
-  if (!m || m.session.id === sid) return NOTHING;
+  if (!state.latches.resume_offered) {
+    const m = hasUnconsumed(projectDir);
+    writeState(projectDir, {
+      ...state,
+      session_id: sid,
+      latches: { ...state.latches, resume_offered: true },
+    });
+    if (m && m.session.id !== sid) parts.push(resumeOffer(m, now));
+  }
 
+  const brief = injectionFor(state, cfg);
+  if (brief) parts.push(brief);
+
+  return parts.length ? ok({ additionalContext: parts.join('\n\n') }) : NOTHING;
+}
+
+function resumeOffer(m: NonNullable<ReturnType<typeof hasUnconsumed>>, now: number): string {
   const ageMin = (now - m.sealed_at) / 60;
   const age =
     ageMin < 60
@@ -206,20 +234,79 @@ function onUserPromptSubmit(projectDir: string, sid: string, now: number): HookR
         ? `${(ageMin / 60).toFixed(1)} hours ago`
         : `${Math.round(ageMin / 60 / 24)} days ago`;
   const next = m.claude_supplied.next_action;
-
-  return ok({
-    additionalContext:
-      `[Guardian] An unfinished handoff from a previous session in this project was sealed ` +
-      `${age}: "${m.seal_reason}".` +
-      (m.objective ? ` Objective: ${m.objective}.` : '') +
-      (next ? ` Next action recorded: ${next}` : '') +
-      `\nIf the user's request relates to that work, run \`/guardian resume\` to load the ` +
-      `full digest and verify the workspace before editing. If it is unrelated, ignore this ` +
-      `and do not mention it.`,
-  });
+  return (
+    `[Guardian] An unfinished handoff from a previous session in this project was sealed ` +
+    `${age}: "${m.seal_reason}".` +
+    (m.objective ? ` Objective: ${m.objective}.` : '') +
+    (next ? ` Next action recorded: ${next}` : '') +
+    `\nIf the user's request relates to that work, run \`/guardian resume\` to load the ` +
+    `full digest and verify the workspace before editing. If it is unrelated, ignore this ` +
+    `and do not mention it.`
+  );
 }
 
-/** Feed the historical-duration table, which is the only defensible basis Guardian has for
+/** Refuse one turn-end so the session seals before it goes quiet.
+ *
+ *  A `Stop` hook that can fire twice is a loop, and a loop here would be far worse than no
+ *  hook at all — so the latch is written to state BEFORE the refusal is returned, and the
+ *  refusal is returned at most once per session whatever happens next. */
+function onStop(projectDir: string, sid: string, now: number): HookResult {
+  const cfg = loadConfig(projectDir);
+  if (!cfg.landing.force_seal_turn) return NOTHING;
+
+  const state = readState(projectDir, sid);
+  if (state.latches.stop_forced) return NOTHING;
+  if (severity(state.mode) < severity('LAND')) return NOTHING;
+  if (state.manifest.sealed_at !== null) return NOTHING;
+
+  writeState(projectDir, { ...state, latches: { ...state.latches, stop_forced: true } });
+  // Exit 2 prevents the stop and shows stderr to Claude.
+  return { stdout: '', exit: 2, stderr: forceSealInstruction(state) };
+}
+
+/** Optional hard brake. Off by default. */
+function onPostToolBatch(projectDir: string, sid: string): HookResult {
+  const cfg = loadConfig(projectDir);
+  if (!cfg.landing.halt_loop_at_emergency) return NOTHING;
+  const state = readState(projectDir, sid);
+  if (state.mode !== 'EMERGENCY' || state.manifest.sealed_at === null) return NOTHING;
+  return {
+    stdout: '',
+    exit: 2,
+    stderr:
+      'Session Guardian halted the loop: the handoff is sealed and the budget is spent. ' +
+      'Resume in a new session with `/guardian resume`.',
+  };
+}
+
+/** A turn that ended in an API error. When that error is a rate limit, this is the moment
+ *  Guardian learns the window has actually closed — and the transcript records when it
+ *  reopens, which no live gauge can tell us after the fact. */
+function onStopFailure(inp: HookInput, projectDir: string, sid: string, now: number): HookResult {
+  if (!isRateLimitError(inp.error_type, inp.error_message)) return NOTHING;
+
+  const tomb = parseRateLimitTombstone(inp.transcript_path);
+  const state = readState(projectDir, sid);
+  const kind = tomb?.kind ?? 'unknown';
+  const resets = tomb?.resets_at ?? state.axes.five_hour?.resets_at ?? null;
+
+  const next: typeof state = {
+    ...state,
+    mode: 'HARD_STOPPED',
+    reason: `${kind} rate limit refused a request`,
+    hard_stop: { at: now, kind, resets_at: resets },
+  };
+  writeState(projectDir, next);
+
+  if (state.manifest.sealed_at === null) {
+    // No git checkpoint: this fires on a failed turn and speed matters more than the ref.
+    seal(projectDir, sid, next, `HARD_STOPPED (${kind} rate limit)`, now, { git: false });
+    writeState(projectDir, { ...next, manifest: { sealed_at: now } });
+  }
+  return NOTHING;
+}
+
+/** Feed the historical-duration table/** Feed the historical-duration table, which is the only defensible basis Guardian has for
  *  saying how long an agent of a given type is likely to take. Also drops the finished
  *  agent's snapshot so the live count stays honest. */
 function recordAgentDuration(inp: HookInput, projectDir: string, sid: string, now: number): void {
@@ -297,6 +384,15 @@ export function handle(event: string, raw: string, now = Date.now() / 1000): Hoo
 
       case 'UserPromptSubmit':
         return onUserPromptSubmit(projectDir, sid, now);
+
+      case 'Stop':
+        return onStop(projectDir, sid, now);
+
+      case 'PostToolBatch':
+        return onPostToolBatch(projectDir, sid);
+
+      case 'StopFailure':
+        return onStopFailure(inp, projectDir, sid, now);
 
       default:
         return NOTHING;

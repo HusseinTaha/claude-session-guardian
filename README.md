@@ -3,10 +3,11 @@
 Sees every Claude Code exhaustion wall coming **with time-to-impact**, not just a percentage,
 and lands the session before it hits.
 
-> Status: **Phases 1–3 complete** — sensor and time-to-wall engine; observation ledger,
-> handoff manifest, lossless compaction, resume with workspace verification, git checkpoints;
-> per-agent sensing, the spawn gate, and self-checkpointing subagents.
-> Phases 4–5 (landing protocol, `doctor`) are specified but not built.
+> Status: **Phases 1–4 complete** — sensor and time-to-wall engine; observation ledger,
+> handoff manifest, lossless compaction, resume with verification, git checkpoints;
+> per-agent sensing, the spawn gate, self-checkpointing subagents; tiered injection, the
+> Stop brake, 429 detection with a reset countdown, and a validated config CLI.
+> Phase 5 (`doctor` cold-resume harness) is specified but not built.
 >
 > **[Full user guide with examples →](docs/GUIDE.md)**
 
@@ -65,7 +66,9 @@ sits on a blocking path:
 | `TaskCreated/Completed`, `SubagentStart/Stop` | task and agent ledgers, free |
 | `PreCompact` | seals a handoff before context goes lossy |
 | `PostCompact` | hands the digest straight back via `additionalContext` |
-| `UserPromptSubmit` | offers a previous session's handoff, once |
+| `UserPromptSubmit` | offers a previous session's handoff once; injects the mode brief |
+| `Stop` | refuses one turn-end at LAND+ with nothing sealed — single-shot |
+| `StopFailure` | reads the 429 tombstone, seals, switches to HARD_STOPPED |
 | `SessionEnd` | last-chance seal (no git checkpoint — 1.5s shared budget) |
 
 ## Continuity
@@ -183,6 +186,53 @@ Nothing else is ever blocked, at any mode. Irreversible shell work — migration
 migration is sometimes right and sometimes leaves a system half-configured, and Guardian
 cannot tell which. If one starts and is never seen to return, the handoff leads with it.
 
+## Landing
+
+Injection cost scales with mode, because Guardian must not spend the budget it protects.
+Nothing below `PREPARE`; one line at `PREPARE`; the landing protocol at `LAND`; two commands
+at `EMERGENCY`. The deeper checklist is a skill that loads only when needed.
+
+If the session tries to end at `LAND` or above with nothing sealed, the `Stop` hook refuses
+the turn-end **once** and asks for a next action and a handoff. A `Stop` hook that can fire
+twice is a loop and worse than no hook, so the latch is persisted before the refusal is
+returned, and the suite hammers it ten times to prove it.
+
+When a 429 lands anyway, `StopFailure` reads the `quotaLimits` record the transcript leaves
+behind — the only place the exact reset timestamp survives — seals a handoff, and switches
+to `HARD_STOPPED` with a countdown:
+
+```
+$ /guardian wait
+Rate limit: five_hour
+Reopens at: 2026-09-01T12:30:00.000Z
+Status:     80m until the window reopens
+```
+
+## Configuration
+
+Everything is set from the command, validated before it is written:
+
+```
+/guardian config                                  list every setting and what it does
+/guardian config set thresholds_minutes.land 8
+/guardian config set agents.deny_spawn_from EMERGENCY
+/guardian config reset
+/guardian off
+```
+
+```
+$ /guardian config set thresholds_minutes.land 40
+error: thresholds_minutes.land — must be <= thresholds_minutes.prepare (12); otherwise
+PREPARE can never be reached before LAND
+
+Nothing was written.
+```
+
+Types come from the defaults rather than a separate schema, so a new option is configurable
+the moment it has a default and the two cannot drift apart. Unknown keys are reported rather
+than ignored — a typo in `config.json` is otherwise silent, which is the whole reason to
+prefer the CLI over the file.
+
 ## Design rules
 
 **Fail open.** A watchdog that breaks the session it watches is worse than no watchdog.
@@ -207,7 +257,7 @@ it holds prompts and paths and does not belong in a commit.
 ## Development
 
 ```bash
-npm run check      # typecheck + build + 133 tests
+npm run check      # typecheck + build + 159 tests
 ```
 
 `GUARDIAN_NOW=<epoch>` replays a session at its original timestamps, which is how the mode
@@ -230,4 +280,6 @@ src/redact.ts   secret redaction for recorded commands
 src/agents.ts   per-agent sampling and historical durations
 src/senseAgents.ts  the subagentStatusLine sensor
 src/gate.ts     the spawn gate and boundary marking
+src/landing.ts  tiered injection, the Stop brake, 429 tombstone parsing
+src/configCmd.ts  config get/set/unset with validation
 ```

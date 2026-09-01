@@ -17,6 +17,7 @@ export function emptyState(sessionId: string): GuardianState {
     agents: { live: 0, spawn_allowed: true },
     samples: [],
     latches: {},
+    hard_stop: null,
     manifest: { sealed_at: null },
   };
 }

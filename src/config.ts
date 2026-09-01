@@ -25,6 +25,7 @@ export const DEFAULT_CONFIG: GuardianConfig = {
     '*flyway*',
     '*dotnet ef database*',
   ],
+  landing: { inject_from: 'PREPARE', force_seal_turn: true, halt_loop_at_emergency: false },
   statusline: { manage: true, chain_existing: true, chained_command: null },
   burn: {
     window_min: 10,

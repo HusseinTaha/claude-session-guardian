@@ -1,7 +1,7 @@
 {
   "name": "claude-session-guardian",
   "displayName": "Claude Session Guardian",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Sees every exhaustion wall coming with time-to-impact, not just a percentage, and lands the session before it hits.",
   "license": "MIT",
   "keywords": [
@@ -11,7 +11,14 @@
     "continuity"
   ],
   "commands": [
-    "./commands/guardian.md"
+    "./commands/guardian.md",
+    "./commands/guardian-status.md",
+    "./commands/guardian-config.md",
+    "./commands/guardian-handoff.md",
+    "./commands/guardian-resume.md",
+    "./commands/guardian-wait.md",
+    "./commands/guardian-agents.md"
   ],
-  "hooks": "./hooks/hooks.json"
+  "hooks": "./hooks/hooks.json",
+  "skills": "./skills/"
 }
