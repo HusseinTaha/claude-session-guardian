@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
-import { readState, writeState, emptyState } from '../src/state.ts';
-import { statePath, configPath, sanitize } from '../src/paths.ts';
-import { loadConfig, DEFAULT_CONFIG } from '../src/config.ts';
-import { install, uninstall } from '../src/install.ts';
+import { readState, writeState, emptyState } from '../src/core/state.ts';
+import { statePath, configPath, sanitize } from '../src/core/paths.ts';
+import { loadConfig, DEFAULT_CONFIG } from '../src/core/config.ts';
+import { install, uninstall } from '../src/ui/install.ts';
 
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), 'guardian-test-'));

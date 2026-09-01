@@ -1,15 +1,15 @@
 import { readFileSync, existsSync } from 'node:fs';
-import { sense } from './sense.ts';
-import { senseAgents } from './senseAgents.ts';
-import { install, uninstall, guardianCommand } from './install.ts';
-import { loadConfig } from './config.ts';
-import { readState } from './state.ts';
-import { renderDashboard } from './render.ts';
-import { statePath, userSettingsPath, resolveStateRoot, stateDir } from './paths.ts';
-import { handle } from './hooks.ts';
-import { latestSessionIn as latestSession } from './sessions.ts';
-import { serve as serveMcp } from './mcp.ts';
-import { appendEvent, type NoteField } from './ledger.ts';
+import { sense } from './sensors/statusline.ts';
+import { senseAgents } from './sensors/subagents.ts';
+import { install, uninstall, guardianCommand } from './ui/install.ts';
+import { loadConfig } from './core/config.ts';
+import { readState } from './core/state.ts';
+import { renderDashboard } from './format/render.ts';
+import { statePath, userSettingsPath, resolveStateRoot, stateDir } from './core/paths.ts';
+import { handle } from './actuators/dispatch.ts';
+import { latestSessionIn as latestSession } from './core/sessions.ts';
+import { serve as serveMcp } from './ui/mcp.ts';
+import { appendEvent, type NoteField } from './handoff/ledger.ts';
 import {
   seal,
   readLatest,
@@ -17,17 +17,17 @@ import {
   verify,
   latestDigestPath,
   latestPath,
-} from './manifest.ts';
-import { removeCheckpoints, listCheckpoints } from './git.ts';
-import { countdown } from './landing.ts';
+} from './handoff/manifest.ts';
+import { removeCheckpoints, listCheckpoints } from './handoff/git.ts';
+import { countdown } from './actuators/landing.ts';
 import {
   audit,
   renderChecks,
   verdict,
   coldResume,
   logTail,
-} from './doctor.ts';
-import { readAgents, typeStats } from './agents.ts';
+} from './ui/doctor.ts';
+import { readAgents, typeStats } from './sensors/agents.ts';
 import {
   flatten,
   getPath,
@@ -39,10 +39,10 @@ import {
   writeUserConfig,
   deleteUserConfig,
   HELP,
-} from './configCmd.ts';
-import { configPath } from './paths.ts';
-import { DEFAULT_CONFIG } from './config.ts';
-import { fmtMin } from './mode.ts';
+} from './ui/configCmd.ts';
+import { configPath } from './core/paths.ts';
+import { DEFAULT_CONFIG } from './core/config.ts';
+import { fmtMin } from './budget/mode.ts';
 
 function readStdin(): string {
   try {

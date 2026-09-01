@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, mkdirSync, appendFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
 import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
-import { redact, clip } from '../src/redact.ts';
+import { redact, clip } from '../src/handoff/redact.ts';
 import {
   appendEvent,
   readLedger,
@@ -12,8 +12,8 @@ import {
   inferOk,
   hashFile,
   commandEvent,
-} from '../src/ledger.ts';
-import { resolveStateRoot, ledgerPath } from '../src/paths.ts';
+} from '../src/handoff/ledger.ts';
+import { resolveStateRoot, ledgerPath } from '../src/core/paths.ts';
 
 const tmp = () => mkdtempSync(join(tmpdir(), 'guardian-led-'));
 /** resolveStateRoot normalises Windows 8.3 short paths, so compare against the real path. */

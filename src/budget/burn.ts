@@ -1,4 +1,4 @@
-import type { AxisName, GuardianConfig, Sample } from './types.ts';
+import type { AxisName, GuardianConfig, Sample } from '../types.ts';
 
 const EPS = 0.01;
 

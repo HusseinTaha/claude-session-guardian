@@ -20,6 +20,7 @@ close, it seals a handoff so the next session can pick the work up exactly where
 - [Checking that it works](#checking-that-it-works)
 - [Troubleshooting](#troubleshooting)
 - [What Guardian does not do](#what-guardian-does-not-do)
+- [How the code is arranged](#how-the-code-is-arranged)
 
 ---
 
@@ -998,3 +999,43 @@ for rate limits, and if your plan omits it, Guardian says `unknown` rather than 
 concluded and checks two things mechanically — whether it echoed the next action, whether it
 named a recorded file. Judging whether the manifest is *good* is left to you, because a
 keyword score dressed up as comprehension would be worse than no score.
+
+---
+
+## How the code is arranged
+
+Only relevant if you are changing Guardian rather than using it.
+
+The folders under `src/` are the architecture rather than a filing convention, and imports
+only ever point downward. `npm run layers` fails the build if that stops being true, so the
+claim cannot quietly rot.
+
+| Layer | Holds | Depends on |
+|---|---|---|
+| `core/` | paths, config, state, sessions, log | nothing but types |
+| `budget/` | burn-rate estimation, the mode ladder | `core` |
+| `format/` | status bar and dashboard rendering | `budget` |
+| `handoff/` | ledger, manifest, git checkpoints, redaction | `core`, `budget` |
+| `sensors/` | statusLine and subagentStatusLine sensors | everything below |
+| `actuators/` | hook dispatch, spawn gate, landing | everything below |
+| `ui/` | install, config command, doctor, MCP | everything below |
+
+`types.ts` and `cli.ts` sit at the top level: one is imported by everything, the other is
+the bundle entry point and is exempt from the layer rule because wiring is its job.
+
+The direction encodes the central design idea. **Sensors write, actuators read.** A sensor
+recomputes burn rates and writes a small `state.json`; an actuator does one `readFileSync`
+of that file and decides. Nothing polls, and no analysis sits on a blocking path — which is
+what keeps the synchronous spawn gate cheap enough to run on every delegation.
+
+Adding a feature means asking which layer it belongs to. If the answer is "it needs to
+import upward", the dependency is inverted and the check will say so.
+
+```bash
+npm run check      # typecheck + layers + build + tests
+npm run layers     # just the architecture check
+npm test           # 189 tests
+```
+
+`GUARDIAN_NOW=<epoch>` replays a session at its original timestamps, which is how the mode
+ladder is demonstrated and how `doctor --cold` reproduces a handoff.

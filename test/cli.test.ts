@@ -5,7 +5,7 @@ import { mkdtempSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { sense } from '../src/sense.ts';
+import { sense } from '../src/sensors/statusline.ts';
 
 const BUNDLE = fileURLToPath(new URL('../dist/guardian.cjs', import.meta.url));
 

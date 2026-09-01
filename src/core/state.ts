@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, renameSync, unlinkSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { GuardianState } from './types.ts';
+import type { GuardianState } from '../types.ts';
 import { statePath, ensureGuardianDir } from './paths.ts';
 
 export function emptyState(sessionId: string): GuardianState {

@@ -1,13 +1,13 @@
 import { spawnSync } from 'node:child_process';
-import { AXES, type AxisName, type AxisState, type GuardianConfig, type GuardianState, type Sample, type StatusLinePayload } from './types.ts';
-import { loadConfig } from './config.ts';
-import { resolveStateRoot } from './paths.ts';
-import { readState, writeState } from './state.ts';
-import { recordSample, rawBurnRate, smooth } from './burn.ts';
-import { axisMode, decide, timeToWall, severity } from './mode.ts';
+import { AXES, type AxisName, type AxisState, type GuardianConfig, type GuardianState, type Sample, type StatusLinePayload } from '../types.ts';
+import { loadConfig } from '../core/config.ts';
+import { resolveStateRoot } from '../core/paths.ts';
+import { readState, writeState } from '../core/state.ts';
+import { recordSample, rawBurnRate, smooth } from '../budget/burn.ts';
+import { axisMode, decide, timeToWall, severity } from '../budget/mode.ts';
 import { readAgents, liveCount } from './agents.ts';
-import { renderStatus } from './render.ts';
-import { log } from './log.ts';
+import { renderStatus } from '../format/render.ts';
+import { log } from '../core/log.ts';
 
 export function resolveProjectDir(p: StatusLinePayload): string {
   const start = p.workspace?.project_dir || p.workspace?.current_dir || p.cwd || process.cwd();

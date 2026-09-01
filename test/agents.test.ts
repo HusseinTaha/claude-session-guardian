@@ -16,14 +16,14 @@ import {
   contextWallMin,
   toEpochSeconds,
   type TaskRow,
-} from '../src/agents.ts';
-import { senseAgents, renderAgentRow } from '../src/senseAgents.ts';
-import { sense } from '../src/sense.ts';
-import { gateSpawn, markBoundary, isSafeBoundaryCommand, globToRegExp } from '../src/gate.ts';
-import { emptyState, writeState, readState } from '../src/state.ts';
-import { DEFAULT_CONFIG } from '../src/config.ts';
-import { buildManifest, renderDigest } from '../src/manifest.ts';
-import { handle } from '../src/hooks.ts';
+} from '../src/sensors/agents.ts';
+import { senseAgents, renderAgentRow } from '../src/sensors/subagents.ts';
+import { sense } from '../src/sensors/statusline.ts';
+import { gateSpawn, markBoundary, isSafeBoundaryCommand, globToRegExp } from '../src/actuators/gate.ts';
+import { emptyState, writeState, readState } from '../src/core/state.ts';
+import { DEFAULT_CONFIG } from '../src/core/config.ts';
+import { buildManifest, renderDigest } from '../src/handoff/manifest.ts';
+import { handle } from '../src/actuators/dispatch.ts';
 import type { GuardianState, Mode } from '../src/types.ts';
 
 const T = 1_800_000_000;

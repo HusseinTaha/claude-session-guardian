@@ -1,10 +1,10 @@
 import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
-import type { GuardianState } from './types.ts';
+import type { GuardianState } from '../types.ts';
 import { readLedger, hashFile, type LedgerEvent } from './ledger.ts';
 import { checkpoint, headMatches, type CheckpointResult } from './git.ts';
-import { handoffDir, ensureGuardianDir } from './paths.ts';
-import { fmtMin } from './mode.ts';
+import { handoffDir, ensureGuardianDir } from '../core/paths.ts';
+import { fmtMin } from '../budget/mode.ts';
 
 const BACKSLASH = /\\/g;
 const toPosix = (p: string): string => p.replace(BACKSLASH, '/');

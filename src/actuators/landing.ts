@@ -1,6 +1,6 @@
 import { openSync, readSync, closeSync, statSync } from 'node:fs';
-import type { GuardianConfig, GuardianState } from './types.ts';
-import { severity, fmtMin } from './mode.ts';
+import type { GuardianConfig, GuardianState } from '../types.ts';
+import { severity, fmtMin } from '../budget/mode.ts';
 
 /** Injection cost scales with mode.
  *

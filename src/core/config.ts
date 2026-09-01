@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import type { GuardianConfig } from './types.ts';
+import type { GuardianConfig } from '../types.ts';
 import { configPath } from './paths.ts';
 
 export const DEFAULT_CONFIG: GuardianConfig = {

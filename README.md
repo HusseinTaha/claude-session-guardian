@@ -285,7 +285,8 @@ it holds prompts and paths and does not belong in a commit.
 ## Development
 
 ```bash
-npm run check      # typecheck + build + 189 tests
+npm run check      # typecheck + layer check + build + 189 tests
+npm run layers     # assert imports only point downward
 ```
 
 `GUARDIAN_NOW=<epoch>` replays a session at its original timestamps, which is how the mode
@@ -293,23 +294,52 @@ ladder is demonstrated and reproduced.
 
 ## Layout
 
+The folders are the architecture. Imports only ever point downward, and
+`npm run layers` fails the build if that stops being true.
+
 ```
-src/burn.ts     burn-rate estimation over a trailing window, reset-aware
-src/mode.ts     time-to-wall + the per-axis state machines
-src/sense.ts    the statusLine sensor (pure core + I/O shell)
-src/state.ts    atomic, Infinity-safe state persistence
-src/install.ts  status line install with chaining
-src/render.ts   status bar and dashboard
-src/hooks.ts    hook dispatch: observation in, continuity out
-src/ledger.ts   append-only observation log
-src/manifest.ts manifest build, seal, digest, verification
-src/git.ts      out-of-band checkpoint refs
-src/redact.ts   secret redaction for recorded commands
-src/agents.ts   per-agent sampling and historical durations
-src/senseAgents.ts  the subagentStatusLine sensor
-src/gate.ts     the spawn gate and boundary marking
-src/landing.ts  tiered injection, the Stop brake, 429 tombstone parsing
-src/configCmd.ts  config get/set/unset with validation
-src/doctor.ts   the self-check and the cold-resume harness
-src/mcp.ts      optional three-tool MCP server, off by default
+src/
+├── types.ts              shared types; everything imports this
+├── cli.ts                entry point, wires the layers together
+│
+├── core/                 foundations
+│   ├── paths.ts          state-root resolution, self-ignoring state dir
+│   ├── config.ts         defaults and merge
+│   ├── state.ts          atomic, Infinity-safe persistence
+│   ├── sessions.ts       "which session is this?"
+│   └── log.ts            best-effort logging that never throws
+│
+├── budget/               the time-to-wall engine
+│   ├── burn.ts           reset-aware rate estimation over a trailing window
+│   └── mode.ts           per-axis state machines and the mode ladder
+│
+├── format/               presentation of budget numbers
+│   └── render.ts         status bar and dashboard
+│
+├── handoff/              the durable record
+│   ├── ledger.ts         append-only observation log
+│   ├── manifest.ts       build, seal, digest, verify
+│   ├── git.ts            out-of-band checkpoint refs
+│   └── redact.ts         secret removal for recorded commands
+│
+├── sensors/              write state, never block
+│   ├── statusline.ts     the statusLine sensor
+│   ├── subagents.ts      the subagentStatusLine sensor
+│   └── agents.ts         per-agent sampling and historical durations
+│
+├── actuators/            read pre-computed state and act
+│   ├── dispatch.ts       hook routing
+│   ├── gate.ts           the spawn gate and boundary marking
+│   └── landing.ts        tiered injection, Stop brake, 429 tombstones
+│
+└── ui/                   what a person or a client talks to
+    ├── install.ts        status line install with chaining
+    ├── configCmd.ts      config get/set/unset with validation
+    ├── doctor.ts         the self-check and cold-resume harness
+    └── mcp.ts            optional three-tool MCP server
 ```
+
+`sensors/` importing `format/` is the one edge worth explaining: the statusLine sensor both
+updates state and prints the bar, so it legitimately needs a formatter. `render.ts` sits
+below it rather than in `ui/` because it is a leaf — it formats numbers and imports nothing
+but types and `budget/mode.ts`.

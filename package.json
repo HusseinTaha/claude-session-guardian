@@ -24,8 +24,9 @@
     "build": "esbuild src/cli.ts --bundle --platform=node --target=node18 --format=cjs --outfile=dist/guardian.cjs --legal-comments=none",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"test/**/*.test.ts\"",
-    "check": "npm run typecheck && npm run build && npm test",
-    "perf": "node --test test/cli.test.ts"
+    "check": "npm run typecheck && npm run layers && npm run build && npm test",
+    "perf": "node --test test/cli.test.ts",
+    "layers": "node scripts/check-layers.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

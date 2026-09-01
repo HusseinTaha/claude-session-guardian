@@ -1,9 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeState, sampleFrom, resolveProjectDir } from '../src/sense.ts';
-import { emptyState } from '../src/state.ts';
-import { DEFAULT_CONFIG } from '../src/config.ts';
-import { renderStatus } from '../src/render.ts';
+import { computeState, sampleFrom, resolveProjectDir } from '../src/sensors/statusline.ts';
+import { emptyState } from '../src/core/state.ts';
+import { DEFAULT_CONFIG } from '../src/core/config.ts';
+import { renderStatus } from '../src/format/render.ts';
 import { resolve } from 'node:path';
 import type { GuardianState, StatusLinePayload } from '../src/types.ts';
 

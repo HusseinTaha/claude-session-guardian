@@ -1,5 +1,5 @@
-import type { AxisState, GuardianConfig, GuardianState, Mode } from './types.ts';
-import { fmtMin } from './mode.ts';
+import type { AxisState, GuardianConfig, GuardianState, Mode } from '../types.ts';
+import { fmtMin } from '../budget/mode.ts';
 
 const C = {
   reset: '\x1b[0m',

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { appendEvent, fileEvent } from '../src/ledger.ts';
+import { appendEvent, fileEvent } from '../src/handoff/ledger.ts';
 import {
   buildManifest,
   seal,
@@ -15,10 +15,10 @@ import {
   verify,
   renderDigest,
   latestDigestPath,
-} from '../src/manifest.ts';
-import { emptyState, readState, writeState } from '../src/state.ts';
-import { handle } from '../src/hooks.ts';
-import { configPath } from '../src/paths.ts';
+} from '../src/handoff/manifest.ts';
+import { emptyState, readState, writeState } from '../src/core/state.ts';
+import { handle } from '../src/actuators/dispatch.ts';
+import { configPath } from '../src/core/paths.ts';
 import type { GuardianState } from '../src/types.ts';
 
 const T = 1_800_000_000;

@@ -1,12 +1,12 @@
 import { readFileSync } from 'node:fs';
-import { resolveStateRoot, stateDir } from './paths.ts';
-import { loadConfig } from './config.ts';
-import { readState } from './state.ts';
-import { renderDashboard } from './render.ts';
-import { seal, readLatest, latestDigestPath } from './manifest.ts';
-import { appendEvent } from './ledger.ts';
-import { latestSessionIn } from './sessions.ts';
-import { log } from './log.ts';
+import { resolveStateRoot, stateDir } from '../core/paths.ts';
+import { loadConfig } from '../core/config.ts';
+import { readState } from '../core/state.ts';
+import { renderDashboard } from '../format/render.ts';
+import { seal, readLatest, latestDigestPath } from '../handoff/manifest.ts';
+import { appendEvent } from '../handoff/ledger.ts';
+import { latestSessionIn } from '../core/sessions.ts';
+import { log } from '../core/log.ts';
 
 /** A minimal MCP stdio server: JSON-RPC 2.0, newline-delimited, no dependencies.
  *

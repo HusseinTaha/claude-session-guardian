@@ -1,9 +1,9 @@
-import type { GuardianConfig, GuardianState, Mode } from './types.ts';
-import { severity, fmtMin } from './mode.ts';
-import { readAgents, liveCount, typeStats } from './agents.ts';
-import { appendEvent } from './ledger.ts';
-import { redact, clip } from './redact.ts';
-import { stateDir } from './paths.ts';
+import type { GuardianConfig, GuardianState, Mode } from '../types.ts';
+import { severity, fmtMin } from '../budget/mode.ts';
+import { readAgents, liveCount, typeStats } from '../sensors/agents.ts';
+import { appendEvent } from '../handoff/ledger.ts';
+import { redact, clip } from '../handoff/redact.ts';
+import { stateDir } from '../core/paths.ts';
 import { join, relative } from 'node:path';
 
 const SPAWN_TOOLS = new Set(['Task', 'Agent']);

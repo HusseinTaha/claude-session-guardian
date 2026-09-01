@@ -1,7 +1,7 @@
 import { appendFileSync, readFileSync, statSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname } from 'node:path';
-import { ledgerPath, ensureGuardianDir } from './paths.ts';
+import { ledgerPath, ensureGuardianDir } from '../core/paths.ts';
 import { redact, clip } from './redact.ts';
 
 /** Everything Guardian can learn by watching, as opposed to by asking.

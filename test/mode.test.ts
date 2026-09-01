@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { timeToWall, axisMode, decide, maxMode } from '../src/mode.ts';
-import { DEFAULT_CONFIG } from '../src/config.ts';
+import { timeToWall, axisMode, decide, maxMode } from '../src/budget/mode.ts';
+import { DEFAULT_CONFIG } from '../src/core/config.ts';
 import type { AxisState } from '../src/types.ts';
 
 const cfg = DEFAULT_CONFIG;

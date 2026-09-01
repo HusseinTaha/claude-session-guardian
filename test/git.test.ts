@@ -10,7 +10,7 @@ import {
   removeCheckpoints,
   isRepo,
   refComponent,
-} from '../src/git.ts';
+} from '../src/handoff/git.ts';
 
 function g(cwd: string, ...args: string[]): string {
   const r = spawnSync('git', args, { cwd, encoding: 'utf8', windowsHide: true });

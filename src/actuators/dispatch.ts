@@ -1,20 +1,20 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { resolveStateRoot } from './paths.ts';
-import { loadConfig } from './config.ts';
-import { readState, writeState } from './state.ts';
-import { appendEvent, fileEvent, commandEvent, classifyCommand } from './ledger.ts';
-import { seal, hasUnconsumed, latestDigestPath, readLatest } from './manifest.ts';
+import { resolveStateRoot } from '../core/paths.ts';
+import { loadConfig } from '../core/config.ts';
+import { readState, writeState } from '../core/state.ts';
+import { appendEvent, fileEvent, commandEvent, classifyCommand } from '../handoff/ledger.ts';
+import { seal, hasUnconsumed, latestDigestPath, readLatest } from '../handoff/manifest.ts';
 import { gateSpawn, markBoundary } from './gate.ts';
-import { readAgents, writeAgents, recordDuration } from './agents.ts';
+import { readAgents, writeAgents, recordDuration } from '../sensors/agents.ts';
 import {
   injectionFor,
   forceSealInstruction,
   parseRateLimitTombstone,
   isRateLimitError,
 } from './landing.ts';
-import { severity } from './mode.ts';
-import { log } from './log.ts';
+import { severity } from '../budget/mode.ts';
+import { log } from '../core/log.ts';
 
 /** Fields Guardian reads from a hook payload. Every hook receives the common set
  *  (session_id, transcript_path, cwd, permission_mode, hook_event_name) plus its own. */

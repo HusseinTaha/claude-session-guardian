@@ -2,13 +2,13 @@ import { readFileSync, existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname, relative } from 'node:path';
-import type { GuardianState } from './types.ts';
-import { loadConfig } from './config.ts';
-import { readLatest, verify, latestDigestPath, type Manifest } from './manifest.ts';
-import { listCheckpoints, isRepo } from './git.ts';
+import type { GuardianState } from '../types.ts';
+import { loadConfig } from '../core/config.ts';
+import { readLatest, verify, latestDigestPath, type Manifest } from '../handoff/manifest.ts';
+import { listCheckpoints, isRepo } from '../handoff/git.ts';
 import { readUserConfig, validateConfig } from './configCmd.ts';
-import { userSettingsPath, stateDir } from './paths.ts';
-import { typeStats } from './agents.ts';
+import { userSettingsPath, stateDir } from '../core/paths.ts';
+import { typeStats } from '../sensors/agents.ts';
 
 export type CheckStatus = 'pass' | 'warn' | 'fail' | 'skip';
 

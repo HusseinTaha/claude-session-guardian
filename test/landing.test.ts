@@ -10,13 +10,13 @@ import {
   isRateLimitError,
   readTail,
   countdown,
-} from '../src/landing.ts';
-import { handle } from '../src/hooks.ts';
-import { emptyState, readState, writeState } from '../src/state.ts';
-import { readLatest, seal } from '../src/manifest.ts';
-import { DEFAULT_CONFIG } from '../src/config.ts';
-import { configPath } from '../src/paths.ts';
-import { appendEvent } from '../src/ledger.ts';
+} from '../src/actuators/landing.ts';
+import { handle } from '../src/actuators/dispatch.ts';
+import { emptyState, readState, writeState } from '../src/core/state.ts';
+import { readLatest, seal } from '../src/handoff/manifest.ts';
+import { DEFAULT_CONFIG } from '../src/core/config.ts';
+import { configPath } from '../src/core/paths.ts';
+import { appendEvent } from '../src/handoff/ledger.ts';
 import type { GuardianState, Mode } from '../src/types.ts';
 
 const T = 1_800_000_000;

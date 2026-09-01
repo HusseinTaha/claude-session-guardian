@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { userSettingsPath, stateDir, configPath } from './paths.ts';
-import { loadConfig, DEFAULT_CONFIG } from './config.ts';
+import { userSettingsPath, stateDir, configPath } from '../core/paths.ts';
+import { loadConfig, DEFAULT_CONFIG } from '../core/config.ts';
 
 const BUNDLE = 'guardian.cjs';
 /** Substring that identifies a status line command as Guardian's. */

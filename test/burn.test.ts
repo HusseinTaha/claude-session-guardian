@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { recordSample, rawBurnRate, smooth } from '../src/burn.ts';
-import { DEFAULT_CONFIG } from '../src/config.ts';
+import { recordSample, rawBurnRate, smooth } from '../src/budget/burn.ts';
+import { DEFAULT_CONFIG } from '../src/core/config.ts';
 import type { Sample } from '../src/types.ts';
 
 const cfg = DEFAULT_CONFIG;

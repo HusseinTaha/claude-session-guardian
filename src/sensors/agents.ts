@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { stateDir, sanitize, ensureGuardianDir } from './paths.ts';
+import { stateDir, sanitize, ensureGuardianDir } from '../core/paths.ts';
 
 /** One live subagent, as reported by `subagentStatusLine` and sampled over time. */
 export interface AgentSnapshot {

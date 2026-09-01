@@ -1,4 +1,4 @@
-import { MODES, type AxisName, type AxisState, type GuardianConfig, type Mode } from './types.ts';
+import { MODES, type AxisName, type AxisState, type GuardianConfig, type Mode } from '../types.ts';
 
 export function severity(m: Mode): number {
   return MODES.indexOf(m);

@@ -1,8 +1,8 @@
 import { readFileSync, writeFileSync, renameSync, existsSync, unlinkSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { MODES, type Mode } from './types.ts';
-import { DEFAULT_CONFIG } from './config.ts';
-import { configPath, ensureGuardianDir } from './paths.ts';
+import { MODES, type Mode } from '../types.ts';
+import { DEFAULT_CONFIG } from '../core/config.ts';
+import { configPath, ensureGuardianDir } from '../core/paths.ts';
 
 type Plain = Record<string, unknown>;
 
