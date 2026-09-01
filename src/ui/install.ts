@@ -1,6 +1,12 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, renameSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { userSettingsPath, stateDir, configPath } from '../core/paths.ts';
+import {
+  userSettingsPath,
+  stateDir,
+  configPath,
+  settingsChain,
+  resolveStateRoot,
+} from '../core/paths.ts';
 import { loadConfig, DEFAULT_CONFIG } from '../core/config.ts';
 
 const BUNDLE = 'guardian.cjs';
@@ -109,6 +115,90 @@ export function install(projectDir: string, settingsFile = userSettingsPath()): 
   scaffoldStateDir(projectDir);
 
   return { settingsFile, chained, alreadyInstalled };
+}
+
+export interface InitResult {
+  projectDir: string;
+  /** The settings file Guardian wrote itself into. */
+  settingsFile: string;
+  /** The file that had been deciding the status line, which may be a different one. */
+  displaced: string;
+  /** Which layer that file is, for a message the user can act on. */
+  scope: 'user' | 'project' | 'project-local';
+  chained: string | null;
+  alreadySensing: boolean;
+}
+
+/** Make Guardian sense *this* project, whatever its settings look like.
+ *
+ *  `install` wires the user's settings, which is right once per machine. It is not enough
+ *  per project: a repo with its own `.claude/settings.json` status line overrides the user
+ *  one outright, and Guardian is then installed, hooked, and completely blind there. This
+ *  finds whichever file actually wins, points it at Guardian, and keeps what it displaced. */
+export function init(startDir: string, userSettings = userSettingsPath()): InitResult {
+  const projectDir = resolveStateRoot(startDir);
+  const chain = settingsChain(projectDir, userSettings);
+
+  // Highest precedence file that defines a status line at all; the user's if none does.
+  let settingsFile = chain[0]!;
+  let existingCmd: string | null = null;
+  for (const file of chain) {
+    const cmd = (readJson(file).statusLine as { command?: string } | undefined)?.command;
+    if (typeof cmd === 'string') {
+      settingsFile = file;
+      existingCmd = cmd;
+    }
+  }
+
+  const alreadySensing = !!existingCmd?.includes(MARKER);
+  const chained = existingCmd && !alreadySensing ? existingCmd : null;
+
+  // Where to write is not the same question as who currently decides. `.claude/settings.json`
+  // is usually committed, and Guardian's command carries an absolute path to one machine's
+  // bundle — writing there would hand every teammate a broken status line. So a project
+  // status line is overridden from `settings.local.json`, which is personal, gitignored by
+  // convention, and higher precedence anyway.
+  const target = settingsFile === chain[0] ? chain[0]! : chain[2]!;
+
+  scaffoldStateDir(projectDir);
+  if (!alreadySensing) {
+    const settings = readJson(target);
+    settings.statusLine = {
+      type: 'command',
+      command: guardianCommand('sense'),
+      refreshInterval: 10,
+    };
+    settings.subagentStatusLine = { type: 'command', command: guardianCommand('sense-agents') };
+    writeJson(target, settings);
+  }
+
+  const cfg = loadConfig(projectDir);
+  writeJson(configPath(projectDir), {
+    ...cfg,
+    statusline: {
+      ...cfg.statusline,
+      manage: true,
+      // Only overwrite when something was actually displaced: re-running init must not
+      // erase a chained command recorded by an earlier run.
+      chained_command: chained ?? cfg.statusline.chained_command,
+    },
+  });
+
+  const scope: InitResult['scope'] = target === chain[0] ? 'user' : 'project-local';
+  return { projectDir, settingsFile: target, displaced: settingsFile, scope, chained, alreadySensing };
+}
+
+/** The settings file that currently points at Guardian, highest precedence first, so an
+ *  uninstall undoes whichever layer an install or an init actually wrote. */
+export function findGuardianSettings(
+  projectDir: string,
+  userSettings = userSettingsPath(),
+): string | null {
+  for (const file of settingsChain(projectDir, userSettings).reverse()) {
+    const cmd = (readJson(file).statusLine as { command?: string } | undefined)?.command;
+    if (typeof cmd === 'string' && cmd.includes(MARKER)) return file;
+  }
+  return null;
 }
 
 /** Restore the displaced status line and stop managing it. */

@@ -7,7 +7,7 @@ and lands the session before it hits.
 > ledger, handoff manifest, lossless compaction, verified resume, git checkpoints; per-agent
 > sensing, the spawn gate, self-checkpointing subagents; tiered injection, the Stop brake,
 > 429 recovery; a validated config CLI, the `doctor` self-check with a cold-resume harness,
-> and an optional three-tool MCP server. 193 tests.
+> and an optional three-tool MCP server. 196 tests.
 >
 > **[Full user guide with examples →](docs/GUIDE.md)**
 
@@ -117,6 +117,21 @@ startup.
 
 With only the binary you get the gauge and every CLI command, but nothing acts on its own:
 no seal at compaction, no spawn gate, no Stop brake. Those are the hooks.
+
+**Per project there is normally nothing to do** — the sensor creates its own state
+directory on the first tick and defaults the rest. The exception is a project that sets its
+own `statusLine` in `.claude/settings.json`, which replaces the user-level one outright and
+leaves Guardian installed, hooked, and sensing nothing. One command fixes it, from anywhere
+inside the project:
+
+```bash
+claude-guardian init        # or /guardian init
+```
+
+It takes over whichever settings layer actually decides the status line, writing to
+`settings.local.json` so no machine-specific absolute path lands in a file the repo shares,
+and keeps the displaced command running first — expanding `${CLAUDE_PROJECT_DIR}` and
+`${VAR:-default}` the way Claude Code would, which `cmd.exe` will not.
 
 `install` never clobbers an existing status line. If you already have one, it is recorded
 and re-run by the sensor on every tick, with Guardian's segment appended:
@@ -348,7 +363,7 @@ it holds prompts and paths and does not belong in a commit.
 ## Development
 
 ```bash
-npm run check      # typecheck + layer check + build + 193 tests
+npm run check      # typecheck + layer check + build + 196 tests
 npm run layers     # assert imports only point downward
 ```
 

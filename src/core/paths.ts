@@ -24,6 +24,17 @@ export function userSettingsPath(): string {
   return join(homedir(), '.claude', 'settings.json');
 }
 
+/** The settings files that can carry a status line, lowest precedence first. A project's
+ *  own `statusLine` replaces the user's outright — it is a single value, not a merge —
+ *  which is how a project can end up looking Guardian-enabled while sensing nothing. */
+export function settingsChain(projectDir: string, userFile = userSettingsPath()): string[] {
+  return [
+    userFile,
+    join(projectDir, '.claude', 'settings.json'),
+    join(projectDir, '.claude', 'settings.local.json'),
+  ];
+}
+
 /** Session ids are UUIDs, but never trust an id straight into a path. */
 export function sanitize(s: string): string {
   return s.replace(/[^A-Za-z0-9._-]/g, '_').slice(0, 100) || 'unknown';

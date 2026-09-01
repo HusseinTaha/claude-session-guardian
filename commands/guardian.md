@@ -1,6 +1,6 @@
 ---
 description: Session Guardian — usage status, handoff, resume, and configuration
-argument-hint: "[status|config|handoff|resume|wait|verify|agents|on|off|install|uninstall]"
+argument-hint: "[status|init|config|handoff|resume|wait|verify|agents|on|off|install|uninstall]"
 allowed-tools: Bash(node:*)
 ---
 
@@ -9,8 +9,10 @@ Run the Guardian CLI with the arguments in `$ARGUMENTS` (default `status`):
 !`node "${CLAUDE_PLUGIN_ROOT}/dist/guardian.cjs" ${ARGUMENTS:-status}`
 
 Report the result to the user. If the output says Guardian has no state for this project
-yet, the status line sensor has not run — tell them to run `/guardian install` and restart
-Claude Code, since the status line command is read at startup.
+yet, the status line sensor has not run here. The usual cause is a project that sets its own
+`statusLine` in `.claude/settings.json`, which replaces the user-level one outright: tell
+them to run `/guardian init` and restart Claude Code, since the status line command is read
+at startup.
 
 ## Reading a dashboard
 

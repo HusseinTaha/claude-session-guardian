@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { sense } from './sensors/statusline.ts';
 import { senseAgents } from './sensors/subagents.ts';
-import { install, uninstall, guardianCommand } from './ui/install.ts';
+import { install, init, uninstall, findGuardianSettings, guardianCommand } from './ui/install.ts';
 import { loadConfig } from './core/config.ts';
 import { readState } from './core/state.ts';
 import { renderDashboard } from './format/render.ts';
@@ -97,6 +97,8 @@ Diagnostics
   log [--lines N]          tail Guardian log (empty unless something failed)
 
 Setup
+  init                     set up Guardian for the project you are in, whichever
+                           settings file actually decides its status line
   install [--settings P]   point statusLine at Guardian, preserving any existing one
   uninstall [--settings P] restore the previous statusLine and delete checkpoint refs
   where                    print the command install would configure
@@ -525,8 +527,31 @@ function main(argv: string[]): number {
       return 0;
     }
 
+    case 'init': {
+      const r = init(projectDir);
+      const where =
+        r.scope === 'user'
+          ? 'your user settings — this covers every project that has none of its own'
+          : `this project only, overriding ${r.displaced}\n            (settings.local.json is personal, so no absolute path reaches the repo)`;
+      out(`Guardian initialised for ${r.projectDir}\n`);
+      out(`  settings: ${r.settingsFile}\n            ${where}\n`);
+      out(`  state:    ${stateDir(r.projectDir)} (ignores itself; nothing to add to .gitignore)\n`);
+      if (r.alreadySensing) {
+        out('  status line already points at Guardian; state directory verified.\n');
+      } else if (r.chained) {
+        out(`  kept the status line that was there, and runs it first:\n    ${r.chained}\n`);
+      } else {
+        out('  no existing status line to keep.\n');
+      }
+      out('\nRestart Claude Code — the status line command is read at startup.\n');
+      return 0;
+    }
+
     case 'uninstall': {
-      const restored = uninstall(projectDir, settingsFile);
+      // Undo whichever layer actually points at Guardian: `init` may have written the
+      // project's settings.local.json rather than the user file.
+      const file = flag(argv, '--settings') ?? findGuardianSettings(projectDir) ?? settingsFile;
+      const restored = uninstall(projectDir, file);
       const refs = removeCheckpoints(projectDir);
       out(`Guardian uninstalled.\n${restored ? `  restored: ${restored}\n` : '  statusLine removed\n'}`);
       out(`  checkpoint refs deleted: ${refs}\n`);

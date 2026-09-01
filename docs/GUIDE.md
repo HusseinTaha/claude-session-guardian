@@ -70,6 +70,40 @@ command on every tick and appends its own segment. Nothing you had is lost.
 no seal before compaction, no spawn gate near a wall, no Stop brake, no 429 recovery. You
 get a gauge that tells you the truth and then lets you drive into the wall anyway.
 
+### Per project: usually nothing, sometimes `init`
+
+Most projects need no setup at all. The sensor resolves the project root itself, creates
+`.claude/guardian/` on the first tick with a `.gitignore` that ignores the whole directory,
+and falls back to the built-in defaults when there is no `config.json`. Open a project and
+work.
+
+The exception is a project that defines its own `statusLine` in `.claude/settings.json`.
+That replaces the user-level one outright — settings are layered, and a status line is a
+single value, not a merge — so Guardian's sensor never runs there. Everything else looks
+installed: the hooks fire, `/guardian` answers, and the state they read is empty. Nothing
+warns you and nothing lands.
+
+```
+$ claude-guardian init
+Guardian initialised for C:\Dev\Misc\claude-guardian
+  settings: C:\Dev\Misc\claude-guardian\.claude\settings.local.json
+            this project only, overriding C:\Dev\Misc\claude-guardian\.claude\settings.json
+            (settings.local.json is personal, so no absolute path reaches the repo)
+  state:    C:\Dev\Misc\claude-guardian\.claude\guardian (ignores itself)
+  kept the status line that was there, and runs it first:
+    node "C:\...\mcp-claude-sharedctx\dist\cli.js" statusline --with "node \"${CLAUDE_PROJECT_DIR:-.}/...\""
+```
+
+`init` finds whichever settings layer actually decides the status line and takes it over
+from `settings.local.json` — never from the shared `.claude/settings.json`, because
+Guardian's command is an absolute path to one machine's bundle and has no business in a
+file the repo commits. Whatever was there is kept and runs first, variables and all:
+`${CLAUDE_PROJECT_DIR}`, `${VAR:-default}` and `$VAR` are expanded the way Claude Code
+would have expanded them, which `cmd.exe` cannot do on its own.
+
+Run it from anywhere inside the project, or as `/guardian init`. It is idempotent, and
+`claude-guardian uninstall` undoes whichever layer it wrote.
+
 To remove everything:
 
 ```bash
@@ -1083,7 +1117,7 @@ import upward", the dependency is inverted and the check will say so.
 ```bash
 npm run check      # typecheck + layers + build + tests
 npm run layers     # just the architecture check
-npm test           # 193 tests
+npm test           # 196 tests
 ```
 
 `GUARDIAN_NOW=<epoch>` replays a session at its original timestamps, which is how the mode

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeState, sampleFrom, resolveProjectDir } from '../src/sensors/statusline.ts';
+import { computeState, sampleFrom, resolveProjectDir, expandVars } from '../src/sensors/statusline.ts';
 import { emptyState } from '../src/core/state.ts';
 import { DEFAULT_CONFIG } from '../src/core/config.ts';
 import { renderStatus } from '../src/format/render.ts';
@@ -137,6 +137,24 @@ test('the status bar stays short and shows the clock only when there is one', ()
   assert.match(line, /ctx .* 62%/);
   assert.match(line, /5h .* 91%/);
   assert.doesNotMatch(line, /⚠/); // no burn rate yet, so no fabricated countdown
+});
+
+test('a chained command keeps the variables Claude Code would have expanded', () => {
+  // Claude Code expands these before running a status line; Guardian re-runs the chained
+  // one itself through cmd.exe, which does not understand ${...} at all. Left literal, a
+  // project bar written this way resolves to a path with braces in it and disappears.
+  const env = { CLAUDE_PROJECT_DIR: 'C:/proj', EMPTY: '' };
+  assert.equal(
+    expandVars('node "${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/bar.cjs"', env),
+    'node "C:/proj/.claude/helpers/bar.cjs"',
+  );
+  assert.equal(expandVars('bar $CLAUDE_PROJECT_DIR', env), 'bar C:/proj');
+  assert.equal(expandVars('bar ${MISSING:-fallback}', env), 'bar fallback');
+  assert.equal(expandVars('bar ${EMPTY:-fallback}', env), 'bar fallback');
+  assert.equal(expandVars('bar ${MISSING}', env), 'bar ');
+  // A bare $name that is not a variable is left alone rather than deleted: it is far more
+  // likely to be part of a path or an argument than an unset variable.
+  assert.equal(expandVars('bar $notavar', env), 'bar $notavar');
 });
 
 test('each gauge is coloured by its own mode, not by its percentage', () => {

@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { readState, writeState, emptyState } from '../src/core/state.ts';
 import { statePath, configPath, sanitize } from '../src/core/paths.ts';
 import { loadConfig, DEFAULT_CONFIG } from '../src/core/config.ts';
-import { install, uninstall } from '../src/ui/install.ts';
+import { install, init, uninstall } from '../src/ui/install.ts';
 import { validateConfig } from '../src/ui/configCmd.ts';
 
 function tmp(): string {
@@ -109,6 +109,48 @@ test('install chains an existing status line rather than replacing it', () => {
 
   assert.equal(uninstall(dir, settings), 'my-bar.sh');
   assert.equal(JSON.parse(readFileSync(settings, 'utf8')).statusLine.command, 'my-bar.sh');
+});
+
+test('init wires whichever settings file actually decides the status line', () => {
+  const dir = tmp();
+  // A project with its own status line: the user's is irrelevant here, because a project
+  // `statusLine` replaces it outright rather than merging. Wiring the user file would
+  // leave Guardian installed and blind in exactly this project.
+  const projSettings = join(dir, '.claude', 'settings.json');
+  mkdirSync(dirname(projSettings), { recursive: true });
+  writeFileSync(projSettings, JSON.stringify({ statusLine: { type: 'command', command: 'repo-bar.cjs' } }));
+
+  const r = init(dir, join(dir, 'user-settings.json'));
+  assert.equal(r.scope, 'project-local');
+  // Compared by suffix: the project dir comes back through realpath, which on Windows
+  // turns the 8.3 temp path this test was handed into its long form.
+  assert.ok(r.settingsFile.endsWith(join('.claude', 'settings.local.json')), r.settingsFile);
+  assert.ok(r.displaced.endsWith(join('.claude', 'settings.json')), r.displaced);
+  assert.equal(r.chained, 'repo-bar.cjs');
+
+  // The shared file is left exactly as the repo had it: Guardian's command is an absolute
+  // path to one machine's bundle and has no business in a committed settings file.
+  assert.equal(JSON.parse(readFileSync(projSettings, 'utf8')).statusLine.command, 'repo-bar.cjs');
+  const local = JSON.parse(readFileSync(join(dir, '.claude', 'settings.local.json'), 'utf8'));
+  assert.match(local.statusLine.command, /guardian\.cjs/);
+  assert.equal(loadConfig(dir).statusline.chained_command, 'repo-bar.cjs');
+
+  // Idempotent, and re-running must not forget what it displaced the first time.
+  const again = init(dir, join(dir, 'user-settings.json'));
+  assert.equal(again.alreadySensing, true);
+  assert.equal(loadConfig(dir).statusline.chained_command, 'repo-bar.cjs');
+});
+
+test('init on a project with no settings of its own leaves the user file deciding', () => {
+  const dir = tmp();
+  const userSettings = join(dir, 'user-settings.json');
+  const r = init(dir, userSettings);
+  assert.equal(r.scope, 'user');
+  assert.match(JSON.parse(readFileSync(userSettings, 'utf8')).statusLine.command, /guardian\.cjs/);
+  // It must not invent a project settings file: that would pin one machine's absolute
+  // paths into a repo other people share.
+  assert.equal(existsSync(join(dir, '.claude', 'settings.json')), false);
+  assert.equal(existsSync(configPath(dir)), true);
 });
 
 test('install preserves unrelated settings and uninstall leaves none of its own', () => {

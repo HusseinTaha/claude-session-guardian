@@ -124,16 +124,37 @@ export function computeState(
   };
 }
 
+/** Expand the shell-style variables Claude Code expands before running a configured
+ *  command: `$NAME`, `${NAME}` and `${NAME:-fallback}`.
+ *
+ *  Guardian has to do this itself. A chained command reaches it as literal text and is
+ *  re-run through `shell: true`, which on Windows is cmd.exe — and cmd.exe has never
+ *  heard of `${...}`. A project status line written as
+ *  `node "${CLAUDE_PROJECT_DIR:-.}/.claude/helpers/bar.cjs"` would resolve to a path with
+ *  that brace expression in it, fail to load, and silently vanish from the bar. */
+export function expandVars(cmd: string, env: Record<string, string | undefined>): string {
+  return cmd
+    .replace(/\$\{(\w+)(?::-([^}]*))?\}/g, (_m, name: string, fallback?: string) => {
+      const v = env[name];
+      return v !== undefined && v !== '' ? v : (fallback ?? '');
+    })
+    .replace(/\$(\w+)/g, (m, name: string) => env[name] ?? m);
+}
+
 /** Run the status line command Guardian displaced, so installing Guardian never costs the
  *  user the status line they already had. */
-function runChained(cmd: string, stdin: string): string {
+function runChained(cmd: string, stdin: string, projectDir: string): string {
   try {
-    const r = spawnSync(cmd, {
+    // Claude Code sets this for the command it launches; the chained one is launched by
+    // Guardian instead, so it has to be supplied here or the child sees nothing.
+    const env = { ...process.env, CLAUDE_PROJECT_DIR: projectDir };
+    const r = spawnSync(expandVars(cmd, env), {
       input: stdin,
       shell: true,
       encoding: 'utf8',
       timeout: 1500,
       windowsHide: true,
+      env,
     });
     return (r.stdout ?? '').trim();
   } catch {
@@ -154,7 +175,7 @@ export function sense(raw: string, now = Date.now() / 1000): string {
   const projectDir = resolveProjectDir(payload);
   const cfg = loadConfig(projectDir);
   const chained = cfg.statusline.chained_command
-    ? runChained(cfg.statusline.chained_command, raw)
+    ? runChained(cfg.statusline.chained_command, raw, projectDir)
     : '';
 
   if (!cfg.enabled) return chained;
