@@ -138,3 +138,26 @@ test('the status bar stays short and shows the clock only when there is one', ()
   assert.match(line, /5h .* 91%/);
   assert.doesNotMatch(line, /⚠/); // no burn rate yet, so no fabricated countdown
 });
+
+test('each gauge is coloured by its own mode, not by its percentage', () => {
+  const GREEN = '\x1b[32m';
+  const RED = '\x1b[31m';
+
+  // Half a window gone with hours to go: green, and the same green whatever the bar
+  // would look like on a percentage-coloured status line.
+  const calm = computeState(emptyState('s1'), full(62, 45, 4 * 3600), cfg, T0);
+  assert.equal(calm.axes.five_hour?.mode, 'NORMAL');
+  assert.ok(renderStatus(calm, cfg).includes(GREEN), 'a calm gauge should be green');
+
+  // The same axis, climbing steadily toward a reset that is too far off to save it.
+  let hot = emptyState('s2');
+  for (let i = 0; i <= 20; i++) {
+    hot = computeState(hot, full(20, 60 + i * 1.5, 4 * 3600 - i * 30), cfg, T0 + i * 30);
+  }
+  assert.equal(hot.axes.five_hour?.mode, 'LAND');
+  assert.ok(renderStatus(hot, cfg).includes(RED), 'a gauge minutes from the wall should be red');
+
+  // And none of it reaches a terminal that asked for plain text.
+  const plain = renderStatus(hot, { ...cfg, render: { ...cfg.render, color: false } });
+  assert.doesNotMatch(plain, /\x1b\[/);
+});

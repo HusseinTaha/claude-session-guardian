@@ -115,6 +115,25 @@ percentage. A tool that panicked at 90% would have made you stop working for no 
 
 The absence of a `⚠ ~Nm` clock is the signal. No clock, no deadline.
 
+### The colours
+
+Each gauge is coloured on its own: green while that axis is calm, amber at `WATCH`, bold
+amber at `PREPARE`, red at `LAND`, inverted red at `EMERGENCY`. The shield takes the colour
+of the worst axis, which is the session mode.
+
+| Colour | The axis is |
+|---|---|
+| green | not heading for a wall — no deadline, or one further out than `thresholds_minutes.watch` |
+| amber | inside the watch horizon |
+| bold amber | inside the prepare horizon |
+| red | at or inside the landing horizon |
+| inverted red | minutes, or already stopped |
+
+The colour tracks the axis's **mode**, not its percentage — so the `5h ▓▓▓▓▓▓▓▓▓░ 94%`
+above is green, because a window that refills faster than you burn it is not a problem at
+any percentage. Colouring the number by the number would contradict the one thing this
+tool exists to tell you. `render.color: false` turns all of it off.
+
 ### The dashboard
 
 ```
@@ -694,7 +713,7 @@ are equivalent.
   "safe_boundary_commands": ["*migrate*", "*deploy*", "terraform *", "*kubectl apply*"],
 
   "burn": {
-    "window_min": 10,
+    "window_min": 15,
     "min_span_s": 45,
     "alpha": 0.35,
     "max_samples": 60,
@@ -719,8 +738,9 @@ are equivalent.
 | `thresholds_percent_floor` | Backstop for when burn rate is not yet measurable. |
 | `axes` | Turn off an axis your plan does not report, to keep the bar short. |
 | `axis_severity_cap` | Highest mode an axis may demand. Remove the `context` cap if you want compaction treated as an emergency. |
-| `burn.window_min` | Longer is steadier, slower to notice a sudden fan-out. |
+| `burn.window_min` | Longer is steadier, slower to notice a sudden fan-out. 15 is calibrated, not guessed — see below. |
 | `burn.alpha` | Higher reacts faster and is twitchier. |
+| `burn.max_samples` | How many readings the state file carries. It also sets how far apart they sit: the window is always covered, so a smaller budget just means coarser spacing. |
 | `burn.reset_margin_min` | Slack required before a refilling window counts as safe. Raise it if you distrust the estimate. |
 | `burn.min_samples` | Readings required before a rate is believed. Two points can lie — one anomalous percentage would otherwise imply an absurd rate. |
 | `agents.deny_spawn_from` | Mode at which new subagents are refused. `HARD_STOPPED` disables the gate. |
@@ -731,6 +751,23 @@ are equivalent.
 | `landing.halt_loop_at_emergency` | Hard brake on the agentic loop at `EMERGENCY`. Off by default. |
 | `render.color` | Set `false` for a terminal that mangles ANSI. |
 | `enabled` | `false` makes Guardian completely silent while leaving it installed. |
+
+### Where the burn defaults come from
+
+`window_min` and `alpha` are not taste. `scripts/calibrate.ts` replays every transcript in
+`~/.claude/projects` through the real estimator and scores the burn it predicted against
+the burn that actually followed five minutes later:
+
+```bash
+node --experimental-strip-types scripts/calibrate.ts
+node --experimental-strip-types scripts/calibrate.ts --windows 10,15,20 --samples 60,240
+```
+
+Across 43 sessions and 1,046 hours, `window_min: 15` with the shipped 60-sample budget
+scored the lowest median relative error (0.41, against 0.46 at a 10-minute window) at both
+the idle and the busy status-line cadence, which is why those are the defaults. Raising
+`max_samples` to buy finer spacing measured *worse* in the tail — the extra readings are
+mostly the rounding in the reported percentage.
 
 Turning it off for one project:
 
@@ -1034,7 +1071,7 @@ import upward", the dependency is inverted and the check will say so.
 ```bash
 npm run check      # typecheck + layers + build + tests
 npm run layers     # just the architecture check
-npm test           # 189 tests
+npm test           # 193 tests
 ```
 
 `GUARDIAN_NOW=<epoch>` replays a session at its original timestamps, which is how the mode

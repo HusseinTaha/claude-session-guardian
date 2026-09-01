@@ -21,13 +21,14 @@
  * relative error is invariant under any linear rescaling of the percentage axis.
  *
  * Usage:  node --experimental-strip-types scripts/calibrate.ts [--projects DIR] [--quick]
+ *         [--alphas A,..] [--windows M,..] [--samples N,..] [--tick S] [--json OUT]
  */
 import { readdirSync, statSync, createReadStream, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { createInterface } from 'node:readline';
 import { DEFAULT_CONFIG } from '../src/core/config.ts';
-import { rawBurnRate, smooth, recordSample } from '../src/budget/burn.ts';
+import { rawBurnRate, smooth, recordSample, spacingS } from '../src/budget/burn.ts';
 import { timeToWall, axisMode, severity } from '../src/budget/mode.ts';
 import type { AxisState, GuardianConfig, Mode, Sample } from '../src/types.ts';
 
@@ -41,7 +42,10 @@ const PROJECTS = flag('--projects', join(homedir(), '.claude', 'projects'))!;
 const JSON_OUT = flag('--json');
 const MIN_BYTES = 400_000;
 const FIVE_H = 5 * 3600;
-const TICK_S = 10; // refreshInterval: the status line re-runs on a timer while idle
+// refreshInterval: the status line re-runs on a timer while idle, and faster than that
+// while a turn is streaming. --tick models the busier cadence, which is the one the
+// sample thinning has to survive.
+const TICK_S = Number(flag('--tick', '10'));
 const HORIZON_MIN = 5; // how far ahead a burn estimate is implicitly a claim about
 
 /** One assistant turn's token spend. */
@@ -227,9 +231,9 @@ function contextSeries(ev: Ev[], ticks: number[]): (number | null)[] {
   return out;
 }
 
-const cfgWith = (alpha: number, windowMin: number): GuardianConfig => ({
+const cfgWith = (alpha: number, windowMin: number, maxSamples: number): GuardianConfig => ({
   ...DEFAULT_CONFIG,
-  burn: { ...DEFAULT_CONFIG.burn, alpha, window_min: windowMin },
+  burn: { ...DEFAULT_CONFIG.burn, alpha, window_min: windowMin, max_samples: maxSamples },
 });
 
 interface Score {
@@ -259,9 +263,10 @@ function replay(
   capacity: number,
   alpha: number,
   windowMin: number,
+  maxSamples: number,
   sc: Score,
 ): void {
-  const cfg = cfgWith(alpha, windowMin);
+  const cfg = cfgWith(alpha, windowMin, maxSamples);
   const t0 = s.ev[0]!.t;
   const t1 = s.ev[s.ev.length - 1]!.t;
   const ticks: number[] = [];
@@ -399,11 +404,24 @@ async function main(): Promise<void> {
     `  -> ${best.w.name}, capacity ${(best.cap / 1e6).toFixed(2)}M weighted tokens per 5h`,
   );
 
-  // ---- Step 2: grid search over the two parameters
-  const ALPHAS = QUICK ? [0.2, 0.35, 0.6] : [0.1, 0.15, 0.2, 0.25, 0.35, 0.5, 0.7, 1.0];
-  const WINDOWS = QUICK ? [5, 10, 20] : [3, 5, 8, 10, 15, 20, 30];
+  // ---- Step 2: grid search over the parameters
+  const list = (f: string, dflt: number[], min: number): number[] => {
+    const raw = flag(f);
+    if (!raw) return dflt;
+    return raw
+      .split(',')
+      .map((x) => Number(x.trim()))
+      .filter((x) => Number.isFinite(x) && x >= min);
+  };
+  const ALPHAS = list('--alphas', QUICK ? [0.2, 0.35, 0.6] : [0.1, 0.15, 0.2, 0.25, 0.35, 0.5, 0.7, 1.0], 0.01);
+  const WINDOWS = list('--windows', QUICK ? [5, 10, 20] : [3, 5, 8, 10, 15, 20, 30], 0.5);
+  // max_samples belongs in the grid because it is not independent of window_min: the
+  // budget decides how far apart retained samples sit, and too small a budget coarsens
+  // the very history window_min asks for. Defaults to the shipped value; --samples sweeps.
+  const SAMPLES = list('--samples', [DEFAULT_CONFIG.burn.max_samples], 2);
   console.log(
-    `\nGrid search -- ${ALPHAS.length} alpha x ${WINDOWS.length} window_min over ${sessions.length} sessions`,
+    `\nGrid search -- ${ALPHAS.length} alpha x ${WINDOWS.length} window_min` +
+      `${SAMPLES.length > 1 ? ` x ${SAMPLES.length} max_samples` : ''} over ${sessions.length} sessions`,
   );
   console.log(`  err  median relative error of predicted burn vs the burn that actually`);
   console.log(`       followed over the next ${HORIZON_MIN} min. Scale-invariant, so the capacity`);
@@ -414,6 +432,8 @@ async function main(): Promise<void> {
   interface Row {
     alpha: number;
     window_min: number;
+    max_samples: number;
+    spacing_s: number;
     err_p50: number;
     err_p90: number;
     flips: number;
@@ -426,31 +446,39 @@ async function main(): Promise<void> {
   const rows: Row[] = [];
   for (const a of ALPHAS) {
     for (const wm of WINDOWS) {
-      const sc = newScore();
-      for (const s of sessions) replay(s, best.w, best.cap, a, wm, sc);
-      rows.push({
-        alpha: a,
-        window_min: wm,
-        err_p50: pct(sc.errs, 50),
-        err_p90: pct(sc.errs, 90),
-        flips: sc.flips,
-        meas: sc.ticks ? sc.measurable / sc.ticks : 0,
-        lead_p50: pct(sc.leads, 50),
-        warned: sc.leads.length,
-        missed: sc.missed,
-        falseLand: sc.falseLand,
-      });
+      for (const ms of SAMPLES) {
+        const sc = newScore();
+        for (const s of sessions) replay(s, best.w, best.cap, a, wm, ms, sc);
+        rows.push({
+          alpha: a,
+          window_min: wm,
+          max_samples: ms,
+          spacing_s: spacingS(cfgWith(a, wm, ms)),
+          err_p50: pct(sc.errs, 50),
+          err_p90: pct(sc.errs, 90),
+          flips: sc.flips,
+          meas: sc.ticks ? sc.measurable / sc.ticks : 0,
+          lead_p50: pct(sc.leads, 50),
+          warned: sc.leads.length,
+          missed: sc.missed,
+          falseLand: sc.falseLand,
+        });
+      }
     }
   }
 
-  const hdr = 'alpha  win   err_p50  err_p90   meas   flips  warned/missed  lead_p50  falseLAND';
+  const hdr =
+    'alpha  win  samp   gap   err_p50  err_p90   meas   flips  warned/missed  lead_p50  falseLAND';
   console.log(hdr);
   console.log('-'.repeat(hdr.length));
   for (const r of rows) {
     const cur =
-      r.alpha === DEFAULT_CONFIG.burn.alpha && r.window_min === DEFAULT_CONFIG.burn.window_min;
+      r.alpha === DEFAULT_CONFIG.burn.alpha &&
+      r.window_min === DEFAULT_CONFIG.burn.window_min &&
+      r.max_samples === DEFAULT_CONFIG.burn.max_samples;
     console.log(
-      `${String(r.alpha).padEnd(6)} ${String(r.window_min).padStart(3)}  ` +
+      `${String(r.alpha).padEnd(6)} ${String(r.window_min).padStart(3)} ` +
+        `${String(r.max_samples).padStart(4)} ${String(r.spacing_s).padStart(4)}s  ` +
         `${fx(r.err_p50, 3).padStart(8)} ${fx(r.err_p90, 2).padStart(8)}  ` +
         `${(r.meas * 100).toFixed(0).padStart(4)}%  ${String(r.flips).padStart(6)}  ` +
         `${String(r.warned).padStart(6)}/${String(r.missed).padEnd(6)} ` +
@@ -463,7 +491,8 @@ async function main(): Promise<void> {
   console.log(`\nBest by prediction error:`);
   for (const r of ok.slice().sort((a, b) => a.err_p50 - b.err_p50).slice(0, 6)) {
     console.log(
-      `  alpha ${String(r.alpha).padEnd(5)} window_min ${String(r.window_min).padStart(2)}   ` +
+      `  alpha ${String(r.alpha).padEnd(5)} window_min ${String(r.window_min).padStart(2)} ` +
+        `max_samples ${String(r.max_samples).padStart(3)} (gap ${r.spacing_s}s)   ` +
         `err_p50 ${fx(r.err_p50, 3)}  err_p90 ${fx(r.err_p90, 2)}  flips ${r.flips}  ` +
         `missed ${r.missed}  falseLAND ${r.falseLand}`,
     );

@@ -7,6 +7,7 @@ import { readState, writeState, emptyState } from '../src/core/state.ts';
 import { statePath, configPath, sanitize } from '../src/core/paths.ts';
 import { loadConfig, DEFAULT_CONFIG } from '../src/core/config.ts';
 import { install, uninstall } from '../src/ui/install.ts';
+import { validateConfig } from '../src/ui/configCmd.ts';
 
 function tmp(): string {
   return mkdtempSync(join(tmpdir(), 'guardian-test-'));
@@ -75,6 +76,18 @@ test('a corrupt config falls back to defaults rather than disabling the guard', 
   mkdirSync(dirname(configPath(dir)), { recursive: true });
   writeFileSync(configPath(dir), 'not json');
   assert.deepEqual(loadConfig(dir), DEFAULT_CONFIG);
+});
+
+test('a sample budget too small for the window is rejected, not silently obeyed', () => {
+  // The two settings are coupled: max_samples decides how far apart samples sit, so a
+  // tiny budget spreads them past the window and no rate is ever measurable.
+  const bad = validateConfig({ burn: { window_min: 30, max_samples: 3 } });
+  const p = bad.find((x) => x.path === 'burn.max_samples');
+  assert.ok(p, `expected a burn.max_samples problem, got ${JSON.stringify(bad)}`);
+  assert.equal(p!.severity, 'error');
+
+  assert.deepEqual(validateConfig({ burn: { window_min: 30 } }), []);
+  assert.deepEqual(validateConfig({}), []);
 });
 
 test('install chains an existing status line rather than replacing it', () => {

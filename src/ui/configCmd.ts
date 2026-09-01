@@ -1,7 +1,8 @@
 import { readFileSync, writeFileSync, renameSync, existsSync, unlinkSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { MODES, type Mode } from '../types.ts';
+import { MODES, type GuardianConfig, type Mode } from '../types.ts';
 import { DEFAULT_CONFIG } from '../core/config.ts';
+import { spacingS } from '../budget/burn.ts';
 import { configPath, ensureGuardianDir } from '../core/paths.ts';
 
 type Plain = Record<string, unknown>;
@@ -197,6 +198,23 @@ export function validateConfig(user: Plain): ConfigProblem[] {
   }
   if (burn.reset_margin_min < 0) {
     problems.push({ path: 'burn.reset_margin_min', message: 'cannot be negative', severity: 'error' });
+  }
+  // max_samples sets how far apart retained samples sit. Too small a budget spreads them
+  // so wide that the window cannot hold the readings a rate needs, and the burn estimate
+  // is never measurable at all -- silently, which is the worst way to lose it.
+  if (burn.window_min > 0 && burn.max_samples >= 2) {
+    const gap = spacingS({ ...DEFAULT_CONFIG, burn } as GuardianConfig);
+    const needed = (burn.min_samples - 1) * gap;
+    if (needed > burn.window_min * 60) {
+      problems.push({
+        path: 'burn.max_samples',
+        message:
+          `too small for burn.window_min ${burn.window_min}: samples land ${gap}s apart, so ` +
+          `${burn.min_samples} of them span ${Math.round(needed)}s and never fit the window — ` +
+          `no burn rate would ever be measurable`,
+        severity: 'error',
+      });
+    }
   }
 
   const w = (user.render as Plain | undefined)?.bar_width ?? DEFAULT_CONFIG.render.bar_width;

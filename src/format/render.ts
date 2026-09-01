@@ -4,6 +4,7 @@ import { fmtMin } from '../budget/mode.ts';
 const C = {
   reset: '\x1b[0m',
   dim: '\x1b[2m',
+  green: '\x1b[32m',
   amber: '\x1b[33m',
   amberBold: '\x1b[1;33m',
   red: '\x1b[31m',
@@ -20,21 +21,40 @@ const MODE_COLOR: Record<Mode, string> = {
   HARD_STOPPED: C.redInv,
 };
 
+/** Green / amber / red per axis, keyed on that axis's own mode rather than on its
+ *  percentage. The mode already folds the percentage floors in, and the tool's whole
+ *  claim is that 95% with a reset two minutes out is calmer than 70% burning fast —
+ *  colouring the number by the number would say the opposite of what it means. */
+const AXIS_COLOR: Record<Mode, string> = {
+  NORMAL: C.green,
+  WATCH: C.amber,
+  PREPARE: C.amberBold,
+  LAND: C.red,
+  EMERGENCY: C.redInv,
+  HARD_STOPPED: C.redInv,
+};
+
 function bar(pct: number, width: number): string {
   const filled = Math.max(0, Math.min(width, Math.round((pct / 100) * width)));
   return '▓'.repeat(filled) + '░'.repeat(width - filled);
 }
 
-function axisSegment(label: string, st: AxisState | undefined, cfg: GuardianConfig): string | null {
+function axisSegment(
+  label: string,
+  st: AxisState | undefined,
+  cfg: GuardianConfig,
+  paint: (s: string, c: string) => string,
+): string | null {
   if (!st || st.used_pct === null) return null;
   const pct = st.used_pct;
-  let seg = `${label} ${bar(pct, cfg.render.bar_width)} ${pct.toFixed(0)}%`;
+  let seg = `${bar(pct, cfg.render.bar_width)} ${pct.toFixed(0)}%`;
   // Only show a clock when there is a real one. Infinity means the window outruns the
   // burn rate, which is reassuring rather than informative, so it stays off the bar.
   if (st.time_to_wall_min !== null && Number.isFinite(st.time_to_wall_min)) {
     seg += ` ⚠ ~${fmtMin(st.time_to_wall_min)}`;
   }
-  return seg;
+  // The label stays uncoloured, so the colour marks the gauge rather than the alphabet.
+  return `${label} ${paint(seg, AXIS_COLOR[st.mode])}`;
 }
 
 /** One short line. The status bar has limited width and Guardian is a passenger on it. */
@@ -43,15 +63,15 @@ export function renderStatus(state: GuardianState, cfg: GuardianConfig): string 
   const paint = (s: string, c: string) => (color ? `${c}${s}${C.reset}` : s);
 
   const segs: string[] = [];
-  const ctx = axisSegment('ctx', state.axes.context, cfg);
+  const ctx = axisSegment('ctx', state.axes.context, cfg, paint);
   if (ctx) segs.push(ctx);
-  const fh = axisSegment('5h', state.axes.five_hour, cfg);
+  const fh = axisSegment('5h', state.axes.five_hour, cfg, paint);
   if (fh) segs.push(fh);
 
   // The weekly window only earns bar space once it is actually a concern.
   const wk = state.axes.seven_day;
   if (wk?.used_pct != null && wk.used_pct >= cfg.thresholds_percent_floor.watch) {
-    segs.push(`7d ${wk.used_pct.toFixed(0)}%`);
+    segs.push(`7d ${paint(`${wk.used_pct.toFixed(0)}%`, AXIS_COLOR[wk.mode])}`);
   }
 
   if (state.cost_usd != null) segs.push(`$${state.cost_usd.toFixed(2)}`);
@@ -63,6 +83,7 @@ export function renderStatus(state: GuardianState, cfg: GuardianConfig): string 
 
 /** Multi-line dashboard for `/guardian status`, where width is not a constraint. */
 export function renderDashboard(state: GuardianState, cfg: GuardianConfig): string {
+  const paint = (s: string, c: string) => (cfg.render.color ? `${c}${s}${C.reset}` : s);
   const rows: string[] = [];
   rows.push('╔═══════════════════════════════════════════════════════════════╗');
   rows.push(`║ CLAUDE SESSION GUARDIAN${' '.repeat(39)}║`);
@@ -80,10 +101,11 @@ export function renderDashboard(state: GuardianState, cfg: GuardianConfig): stri
           ? `~${fmtMin(st.time_to_wall_min)}`
           : 'refills first';
     const burn = st.burn_pct_per_min === null ? '—' : `${st.burn_pct_per_min.toFixed(2)} %/min`;
+    const gauge = `${bar(st.used_pct, cfg.render.bar_width)} ${st.used_pct.toFixed(1).padStart(5)}%`;
     rows.push(
       pad(
-        `${name.padEnd(10)} ${bar(st.used_pct, cfg.render.bar_width)} ` +
-          `${st.used_pct.toFixed(1).padStart(5)}%  burn ${burn.padEnd(12)} wall ${ttw}`,
+        `${name.padEnd(10)} ${paint(gauge, AXIS_COLOR[st.mode])}  ` +
+          `burn ${burn.padEnd(12)} wall ${ttw}`,
       ),
     );
   }

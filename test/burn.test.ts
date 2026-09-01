@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { recordSample, rawBurnRate, smooth } from '../src/budget/burn.ts';
+import { recordSample, rawBurnRate, smooth, spacingS } from '../src/budget/burn.ts';
 import { DEFAULT_CONFIG } from '../src/core/config.ts';
 import type { Sample } from '../src/types.ts';
 
@@ -54,11 +54,35 @@ test('rawBurnRate treats an idle series as unmeasurable rather than zero', () =>
   assert.equal(rawBurnRate(flat, 'five_hour', cfg, T0 + 300), null);
 });
 
-test('recordSample collapses sub-5s ticks so quantisation noise cannot dominate', () => {
+test('recordSample thins ticks inside one spacing interval down to a moving tail', () => {
   let s: Sample[] = [];
   for (let i = 0; i < 10; i++) s = recordSample(s, { t: T0 + i, five_hour: 10 + i }, cfg);
-  assert.equal(s.length, 1);
-  assert.equal(s[0]!.five_hour, 19); // keeps the freshest reading
+  assert.equal(s.length, 2); // the anchor, plus a tail that keeps being overwritten
+  assert.equal(s[0]!.five_hour, 10); // the anchor is left where it was
+  assert.equal(s[1]!.five_hour, 19); // the tail is the freshest reading
+  assert.equal(s[1]!.t, T0 + 9); // ... at its real time, so the slope is not distorted
+});
+
+test('spacing is whatever it takes to fit window_min inside max_samples', () => {
+  // Retention is two windows deep, so 15 minutes of history in 60 samples is a 30s gap.
+  assert.equal(spacingS(cfg), (cfg.burn.window_min * 60 * 2) / cfg.burn.max_samples);
+  assert.equal(spacingS(cfg), 30);
+  // A budget generous enough for a 5s gap does not go finer than the noise floor.
+  assert.equal(spacingS({ ...cfg, burn: { ...cfg.burn, max_samples: 10_000 } }), 5);
+});
+
+test('the configured window is reachable however fast the status line fires', () => {
+  // The regression this guards: with a fixed 5s gap, 60 samples held only 300s, so a
+  // window_min of 10 was silently truncated to 5 and the burn estimate ran on half the
+  // history it was configured for -- measured at more than double the prediction error.
+  let s: Sample[] = [];
+  for (let i = 0; i <= 20 * 60; i++) s = recordSample(s, { t: T0 + i, five_hour: i * 0.01 }, cfg);
+  const span = s[s.length - 1]!.t - s[0]!.t;
+  assert.ok(
+    span >= cfg.burn.window_min * 60,
+    `retained ${span}s of history, want at least ${cfg.burn.window_min * 60}s`,
+  );
+  assert.ok(s.length <= cfg.burn.max_samples, `kept ${s.length} samples`);
 });
 
 test('recordSample keeps ticks that are far enough apart, and bounds the ring', () => {

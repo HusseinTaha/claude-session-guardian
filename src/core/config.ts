@@ -27,8 +27,13 @@ export const DEFAULT_CONFIG: GuardianConfig = {
   ],
   landing: { inject_from: 'PREPARE', force_seal_turn: true, halt_loop_at_emergency: false },
   statusline: { manage: true, chain_existing: true, chained_command: null },
+  // Calibrated against 43 real transcripts by scripts/calibrate.ts: window_min 15 with a
+  // 60-sample budget scored the lowest prediction error (median 0.41 against the burn that
+  // actually followed, versus 0.46 at a 10-minute window) at both the idle and the busy
+  // status-line cadence. A larger budget buys nothing -- the finer 5s spacing it implies
+  // is measurably worse in the tail, because the extra samples are mostly rounding noise.
   burn: {
-    window_min: 10,
+    window_min: 15,
     min_span_s: 45,
     alpha: 0.35,
     max_samples: 60,

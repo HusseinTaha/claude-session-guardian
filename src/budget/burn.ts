@@ -2,13 +2,39 @@ import type { AxisName, GuardianConfig, Sample } from '../types.ts';
 
 const EPS = 0.01;
 
-/** Append a sample, collapsing near-duplicate ticks. The status line can fire every
- *  300ms; keeping all of those would give a rate estimate dominated by quantisation
- *  noise (percentages arrive rounded), so we thin to at most one sample per 5s. */
+/** Floor on the gap between retained samples. The status line can fire every 300ms;
+ *  keeping all of those would give a rate estimate dominated by quantisation noise
+ *  (percentages arrive rounded). */
+const MIN_SPACING_S = 5;
+
+/** How far apart retained samples are held, in seconds.
+ *
+ *  `max_samples` bounds what the state file carries; `window_min` says how much history
+ *  the estimator wants. Held at a fixed 5s gap the two silently contradict each other —
+ *  60 samples cover 300s, so any window over 5 minutes was quietly truncated and the
+ *  configured one unreachable. Spacing the samples out instead honours both: the window
+ *  is always covered, and the count still caps the file. */
+export function spacingS(cfg: GuardianConfig): number {
+  const retentionS = cfg.burn.window_min * 60 * 2;
+  const budget = Math.max(2, Math.floor(cfg.burn.max_samples));
+  return Math.max(MIN_SPACING_S, Math.ceil(retentionS / budget));
+}
+
+/** Append a sample, thinning ticks that land inside one spacing interval.
+ *
+ *  The tail of the series is provisional: the newest reading overwrites it until it sits
+ *  a full interval past the sample before it, and only then does it freeze and a fresh
+ *  tail start. So the head never lags a tick, and the committed samples stay evenly
+ *  spaced however fast the status line fires.
+ *
+ *  Measuring the gap from the tail instead is the trap, and was the bug: overwriting also
+ *  advances the tail's timestamp, so a stream firing faster than the interval resets the
+ *  clock every time and the series never grows past one point -- leaving the burn rate
+ *  permanently unmeasurable in exactly the busy sessions that need it. */
 export function recordSample(prev: Sample[], next: Sample, cfg: GuardianConfig): Sample[] {
   const out = prev.slice();
-  const last = out[out.length - 1];
-  if (last && next.t - last.t < 5) out[out.length - 1] = next;
+  const anchor = out[out.length - 2];
+  if (anchor && next.t - anchor.t < spacingS(cfg)) out[out.length - 1] = next;
   else out.push(next);
 
   const cutoff = next.t - cfg.burn.window_min * 60 * 2;

@@ -7,7 +7,7 @@ and lands the session before it hits.
 > ledger, handoff manifest, lossless compaction, verified resume, git checkpoints; per-agent
 > sensing, the spawn gate, self-checkpointing subagents; tiered injection, the Stop brake,
 > 429 recovery; a validated config CLI, the `doctor` self-check with a cold-resume harness,
-> and an optional three-tool MCP server. 189 tests.
+> and an optional three-tool MCP server. 193 tests.
 >
 > **[Full user guide with examples →](docs/GUIDE.md)**
 
@@ -119,6 +119,10 @@ node dist/guardian.cjs uninstall   # restores exactly what was there before
 ```
 🛡 PREPARE ctx ▓▓▓▓▓░░░░░ 45% ⚠ ~28m  5h ▓▓▓▓▓▓▓▓░░ 83% ⚠ ~12m  $5.00
 ```
+
+Each gauge carries its own colour — green calm, amber at `WATCH`, bold amber at `PREPARE`,
+red at `LAND`, inverted red at `EMERGENCY` — keyed on that axis's mode rather than its
+percentage, so a 94% window that refills faster than you burn it stays green.
 
 `/guardian status` renders the full picture:
 
@@ -261,6 +265,29 @@ session — then prints what it concluded. The two mechanical checks are keyword
 comprehension; the value is reading what a cold reader actually understood. If a model with
 no memory of the work cannot say what to do next, neither could you tomorrow.
 
+### The burn estimator is calibrated, not guessed
+
+```bash
+node --experimental-strip-types scripts/calibrate.ts
+```
+
+`scripts/calibrate.ts` replays every transcript in `~/.claude/projects` — here 43 sessions,
+106k usage records, 1,046 hours, 22 real `five_hour` 429s — through the real estimator, and
+scores predicted burn against the burn that actually followed over the next five minutes.
+That score is a *relative* error, so it survives not knowing Anthropic's token weighting:
+any linear rescaling of the percentage axis cancels out.
+
+It is a defect-finder as much as a tuner. It is what caught the sample-thinning bug where a
+status line firing faster than the thinning interval kept overwriting the same slot, so the
+series never grew and the burn rate stayed permanently unmeasurable in exactly the busy
+sessions that need it. On the fixed estimator, `window_min: 15` scores a median relative
+error of **0.41** against **0.46** at 10 minutes, at both the idle and the busy cadence —
+which is where the shipped default comes from.
+
+The level-dependent columns it prints (`warned/missed`, `falseLAND`) are labelled
+untrustworthy in its own output, and they mean it: the implied 5-hour capacity solved from
+the observed 429s has a 51% spread, so those columns are shape, not detection rates.
+
 ## Design rules
 
 **Fail open.** A watchdog that breaks the session it watches is worse than no watchdog.
@@ -285,7 +312,7 @@ it holds prompts and paths and does not belong in a commit.
 ## Development
 
 ```bash
-npm run check      # typecheck + layer check + build + 189 tests
+npm run check      # typecheck + layer check + build + 193 tests
 npm run layers     # assert imports only point downward
 ```
 
