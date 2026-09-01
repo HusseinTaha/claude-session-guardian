@@ -25,7 +25,7 @@ Do not spend budget re-describing any of this. Hooks recorded it as you worked:
 Intent. That is the entire job:
 
 ```bash
-claude-guardian note --next "<the single most specific next step>"
+guardian note --next "<the single most specific next step>"
 ```
 
 This is the highest-value line in the manifest. Compare:
@@ -37,9 +37,9 @@ This is the highest-value line in the manifest. Compare:
 Add these when they apply:
 
 ```bash
-claude-guardian note --decision "Chose idempotency keys over a dedupe table; see ADR 014"
-claude-guardian note --gotcha   "The staging webhook secret rotates nightly; re-fetch first"
-claude-guardian note --objective "Migrate billing off the legacy gateway"
+guardian note --decision "Chose idempotency keys over a dedupe table; see ADR 014"
+guardian note --gotcha   "The staging webhook secret rotates nightly; re-fetch first"
+guardian note --objective "Migrate billing off the legacy gateway"
 ```
 
 A `--gotcha` is worth writing whenever you know something a fresh session would get wrong.
@@ -49,7 +49,7 @@ A `--gotcha` is worth writing whenever you know something a fresh session would 
 ### LAND
 
 1. Bring the current operation to a stopping point. Do not start another.
-2. `claude-guardian note --next "..."`, plus `--gotcha` / `--decision` if relevant.
+2. `guardian note --next "..."`, plus `--gotcha` / `--decision` if relevant.
 3. `/guardian handoff`
 
 New subagents are blocked at this point. Small remaining work goes inline, where its
@@ -60,8 +60,8 @@ partial results stay in this session instead of vanishing with a delegation.
 The next request may be refused. Do two commands, nothing else:
 
 ```bash
-claude-guardian note --next "..."
-claude-guardian handoff --reason EMERGENCY
+guardian note --next "..."
+guardian handoff --reason EMERGENCY
 ```
 
 No refactors, no "one last fix", no test runs. A sealed handoff with an unfinished feature

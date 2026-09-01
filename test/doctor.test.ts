@@ -213,7 +213,7 @@ test('the report renders every check and every fix', () => {
   const dir = tmp();
   const out = renderChecks(audit(dir, null, T, join(dir, 'nope.json')));
   assert.match(out, /\[FAIL\] status line/);
-  assert.match(out, /→ run `claude-guardian install`/);
+  assert.match(out, /→ run `guardian init`/);
 });
 
 test('verdict distinguishes not-resumable, resumable-with-gaps, and clean', () => {

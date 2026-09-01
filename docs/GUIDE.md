@@ -30,7 +30,7 @@ Guardian is two halves, and a full install wants both.
 
 | Half | Gives you | Installed by |
 |---|---|---|
-| the binary | the gauge, the state, every CLI command | `npm install -g .` |
+| the binary | the gauge, the state, every CLI command, as `guardian` (and `claude-guardian`, for a PATH that already has a `guardian`) | `npm install -g .` |
 | the plugin | the hooks that act on that state, the `guardian-protocol` skill, `/guardian` | `claude plugin install` |
 
 ```bash
@@ -38,8 +38,8 @@ git clone <this repo> && cd claude-session-guardian
 npm install
 npm run build
 
-npm install -g .            # puts `claude-guardian` on PATH, everywhere
-claude-guardian install     # wires the status line into ~/.claude/settings.json
+npm install -g .            # puts `guardian` on PATH, everywhere
+guardian install     # wires the status line into ~/.claude/settings.json
 
 claude plugin marketplace add .
 claude plugin install claude-session-guardian@claude-session-guardian
@@ -49,7 +49,7 @@ Then **restart Claude Code**. Both the status line command and the plugin are re
 startup, so a running session will not pick either up.
 
 ```
-$ claude-guardian install
+$ guardian install
 Guardian installed.
   settings: C:\Users\you\.claude\settings.json
   command:  node "C:/path/to/dist/guardian.cjs" sense
@@ -84,12 +84,12 @@ installed: the hooks fire, `/guardian` answers, and the state they read is empty
 warns you and nothing lands.
 
 ```
-$ claude-guardian init
-Guardian initialised for C:\Dev\Misc\claude-guardian
-  settings: C:\Dev\Misc\claude-guardian\.claude\settings.local.json
-            this project only, overriding C:\Dev\Misc\claude-guardian\.claude\settings.json
+$ guardian init
+Guardian initialised for C:\Dev\Misc\guardian
+  settings: C:\Dev\Misc\guardian\.claude\settings.local.json
+            this project only, overriding C:\Dev\Misc\guardian\.claude\settings.json
             (settings.local.json is personal, so no absolute path reaches the repo)
-  state:    C:\Dev\Misc\claude-guardian\.claude\guardian (ignores itself)
+  state:    C:\Dev\Misc\guardian\.claude\guardian (ignores itself)
   kept the status line that was there, and runs it first:
     node "C:\...\mcp-claude-sharedctx\dist\cli.js" statusline --with "node \"${CLAUDE_PROJECT_DIR:-.}/...\""
 ```
@@ -102,12 +102,12 @@ file the repo commits. Whatever was there is kept and runs first, variables and 
 would have expanded them, which `cmd.exe` cannot do on its own.
 
 Run it from anywhere inside the project, or as `/guardian init`. It is idempotent, and
-`claude-guardian uninstall` undoes whichever layer it wrote.
+`guardian uninstall` undoes whichever layer it wrote.
 
 To remove everything:
 
 ```bash
-claude-guardian uninstall            # restores your old status line, deletes checkpoint refs
+guardian uninstall            # restores your old status line, deletes checkpoint refs
 claude plugin uninstall claude-session-guardian
 rm -rf .claude/guardian              # and the state, if you want it gone
 ```
@@ -344,7 +344,7 @@ If no next action was recorded, it says so, because that is the field that matte
 
 ```
 No next action recorded. Add one so the next session does not have to guess:
-  claude-guardian note --next "<the single most specific next step>"
+  guardian note --next "<the single most specific next step>"
 ```
 
 ### Resuming
@@ -412,7 +412,7 @@ Build endpoint · ctx 91% · 2m of ~18m (n=3) · WARN ctx full ~1m
 History accumulates across sessions:
 
 ```
-$ claude-guardian agents
+$ guardian agents
 Explore                  18% ctx      2100 tok/min
 
 Historical duration by agent type:
@@ -499,10 +499,10 @@ Guardian sees files, commands, commits, tasks and agents. It cannot see *why*. F
 close that gap:
 
 ```bash
-claude-guardian note --objective "Migrate billing off the legacy gateway"
-claude-guardian note --next     "Wire StripeAdapter into PaymentService, then run integration tests"
-claude-guardian note --decision "Chose idempotency keys over dedupe table — see ADR 014"
-claude-guardian note --gotcha   "The staging webhook secret rotates nightly; re-fetch before testing"
+guardian note --objective "Migrate billing off the legacy gateway"
+guardian note --next     "Wire StripeAdapter into PaymentService, then run integration tests"
+guardian note --decision "Chose idempotency keys over dedupe table — see ADR 014"
+guardian note --gotcha   "The staging webhook secret rotates nightly; re-fetch before testing"
 ```
 
 `--next` is the highest-value line in the entire manifest. One specific sentence there
@@ -583,7 +583,7 @@ open.
 Land the work. In this order:
 1. Bring the current operation to a stopping point. Do not start another.
 2. Record what cannot be observed from the files:
-   `claude-guardian note --next "<the single most specific next step>"`
+   `guardian note --next "<the single most specific next step>"`
    Add `--gotcha` or `--decision` for anything a fresh session would get wrong.
 3. Seal it: `/guardian handoff`.
 
@@ -605,7 +605,7 @@ the turn-end once and asks for exactly one thing:
 ```
 Session Guardian is in LAND (5-hour: 96% used, ~4m to wall) and no handoff has been
 sealed. Before stopping, do exactly this and nothing more: record the next action
-with `claude-guardian note --next "..."`, then run `claude-guardian handoff
+with `guardian note --next "..."`, then run `guardian handoff
 --reason "LAND"`. Then stop.
 ```
 
@@ -832,15 +832,15 @@ echo '{ "enabled": false }' > .claude/guardian/config.json
 | `/guardian resume` | Print the sealed handoff plus workspace verification; mark consumed |
 | `/guardian verify` | Check the manifest against the workspace without consuming it |
 | `/guardian install` / `uninstall` | Set up or remove the status line |
-| `claude-guardian note --objective\|--next\|--decision\|--gotcha <text>` | Record intent |
+| `guardian note --objective\|--next\|--decision\|--gotcha <text>` | Record intent |
 | `/guardian wait` | Countdown to a rate-limit window reopening |
 | `/guardian config [get\|set\|unset\|reset\|check\|path]` | Read and change settings, validated |
 | `/guardian doctor [--cold] [--seal] [--strict]` | Could a fresh session resume this work? |
 | `/guardian log [--lines N]` | Tail Guardian's own log |
 | `/guardian on` / `off` | Enable or disable Guardian for this project |
-| `claude-guardian agents` | Live subagents, plus historical duration by agent type |
-| `claude-guardian checkpoints` | List git checkpoint refs |
-| `claude-guardian where` | Print the command `install` configures |
+| `guardian agents` | Live subagents, plus historical duration by agent type |
+| `guardian checkpoints` | List git checkpoint refs |
+| `guardian where` | Print the command `install` configures |
 
 `sense`, `sense-agents`, `hook <Event>` and `mcp` are internal; Claude Code invokes them.
 
@@ -913,7 +913,7 @@ Guardian self-check
   [ok  ] burn rate      measurable, so time-to-wall is real
   [ok  ] handoff        sealed 2m ago — PreCompact (auto)
   [FAIL] next action    absent — the resuming session has to guess where to start
-                       → claude-guardian note --next "<the single most specific next step>"
+                       → guardian note --next "<the single most specific next step>"
   [warn] objective      absent; the resuming session knows the steps but not the goal
   [ok  ] files          14 tracked, 14 verifiable by hash
   [ok  ] workspace      matches the sealed manifest

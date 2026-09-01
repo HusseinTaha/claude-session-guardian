@@ -7,7 +7,7 @@ import { loadConfig } from '../core/config.ts';
 import { readLatest, verify, latestDigestPath, type Manifest } from '../handoff/manifest.ts';
 import { listCheckpoints, isRepo } from '../handoff/git.ts';
 import { readUserConfig, validateConfig } from './configCmd.ts';
-import { userSettingsPath, stateDir } from '../core/paths.ts';
+import { userSettingsPath, stateDir, settingsChain } from '../core/paths.ts';
 import { typeStats } from '../sensors/agents.ts';
 
 export type CheckStatus = 'pass' | 'warn' | 'fail' | 'skip';
@@ -37,41 +37,54 @@ export function audit(
   const cfg = loadConfig(projectDir);
 
   // ---------------------------------------------------------------- installation
+  // The status line that actually runs is the highest-precedence one, not the user's. A
+  // project's own `statusLine` replaces it outright, so checking only the user file
+  // reports a confident "points at Guardian" for a project where the sensor never runs —
+  // which is the exact failure this check exists to catch.
   let statusLineCmd: string | null = null;
-  try {
-    const settings = JSON.parse(readFileSync(settingsFile, 'utf8')) as {
-      statusLine?: { command?: string };
-      subagentStatusLine?: { command?: string };
-    };
-    statusLineCmd = settings.statusLine?.command ?? null;
-    checks.push(
-      statusLineCmd?.includes('guardian.cjs')
-        ? { name: 'status line', status: 'pass', detail: 'points at Guardian' }
-        : {
-            name: 'status line',
-            status: 'fail',
-            detail: statusLineCmd ? `points elsewhere: ${statusLineCmd}` : 'not configured',
-            fix: 'run `claude-guardian install`, then restart Claude Code',
-          },
-    );
-    checks.push(
-      settings.subagentStatusLine?.command?.includes('guardian.cjs')
-        ? { name: 'agent rows', status: 'pass', detail: 'per-agent sensing is wired' }
-        : {
-            name: 'agent rows',
-            status: 'warn',
-            detail: 'subagentStatusLine not set; per-agent context and pace are unavailable',
-            fix: 'run `claude-guardian install`',
-          },
-    );
-  } catch {
-    checks.push({
-      name: 'status line',
-      status: 'fail',
-      detail: `could not read ${settingsFile}`,
-      fix: 'run `claude-guardian install`',
-    });
+  let subagentCmd: string | null = null;
+  let deciding = settingsFile;
+  for (const file of settingsChain(projectDir, settingsFile)) {
+    let settings: { statusLine?: { command?: string }; subagentStatusLine?: { command?: string } };
+    try {
+      settings = JSON.parse(readFileSync(file, 'utf8'));
+    } catch {
+      continue; // absent or malformed: it decides nothing
+    }
+    if (typeof settings.statusLine?.command === 'string') {
+      statusLineCmd = settings.statusLine.command;
+      deciding = file;
+    }
+    if (typeof settings.subagentStatusLine?.command === 'string') {
+      subagentCmd = settings.subagentStatusLine.command;
+    }
   }
+
+  const senses = !!statusLineCmd?.includes('guardian.cjs');
+  checks.push(
+    senses
+      ? { name: 'status line', status: 'pass', detail: 'points at Guardian' }
+      : {
+          name: 'status line',
+          status: 'fail',
+          detail: statusLineCmd
+            ? `${deciding} points elsewhere: ${statusLineCmd}`
+            : 'not configured',
+          // `init` rather than `install`: whatever is winning here has to be taken over
+          // where it is, and it may not be the user's settings file.
+          fix: 'run `guardian init`, then restart Claude Code',
+        },
+  );
+  checks.push(
+    subagentCmd?.includes('guardian.cjs')
+      ? { name: 'agent rows', status: 'pass', detail: 'per-agent sensing is wired' }
+      : {
+          name: 'agent rows',
+          status: 'warn',
+          detail: 'subagentStatusLine not set; per-agent context and pace are unavailable',
+          fix: 'run `guardian init`',
+        },
+  );
 
   checks.push(
     cfg.enabled
@@ -80,7 +93,7 @@ export function audit(
           name: 'enabled',
           status: 'fail',
           detail: 'disabled by config; Guardian is silent',
-          fix: 'run `claude-guardian on`',
+          fix: 'run `guardian on`',
         },
   );
 
@@ -92,7 +105,7 @@ export function audit(
           name: 'config',
           status: 'fail',
           detail: errs.map((p) => `${p.path}: ${p.message}`).join('; '),
-          fix: 'run `claude-guardian config check`',
+          fix: 'run `guardian config check`',
         }
       : problems.length
         ? {
@@ -156,7 +169,7 @@ export function audit(
       name: 'handoff',
       status: 'fail',
       detail: 'no manifest has ever been sealed in this project',
-      fix: 'run `claude-guardian handoff` — until then a lost session loses its work',
+      fix: 'run `guardian handoff` — until then a lost session loses its work',
     });
     return checks;
   }
@@ -184,7 +197,7 @@ export function auditManifest(projectDir: string, m: Manifest): Check[] {
           name: 'next action',
           status: 'fail',
           detail: 'absent — the resuming session has to guess where to start',
-          fix: 'claude-guardian note --next "<the single most specific next step>"',
+          fix: 'guardian note --next "<the single most specific next step>"',
         },
   );
 
@@ -195,7 +208,7 @@ export function auditManifest(projectDir: string, m: Manifest): Check[] {
           name: 'objective',
           status: 'warn',
           detail: 'absent; the resuming session knows the steps but not the goal',
-          fix: 'claude-guardian note --objective "..."',
+          fix: 'guardian note --objective "..."',
         },
   );
 
@@ -293,7 +306,7 @@ export function auditManifest(projectDir: string, m: Manifest): Check[] {
   checks.push(
     digestExists
       ? { name: 'digest', status: 'pass', detail: 'the injectable summary exists' }
-      : { name: 'digest', status: 'fail', detail: 'latest.md is missing', fix: 're-seal with `claude-guardian handoff`' },
+      : { name: 'digest', status: 'fail', detail: 'latest.md is missing', fix: 're-seal with `guardian handoff`' },
   );
 
   return checks;

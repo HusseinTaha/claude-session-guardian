@@ -105,8 +105,8 @@ carries the hooks that act on it, plus the `/guardian` commands.
 
 ```bash
 npm install && npm run build
-npm install -g .                                    # puts `claude-guardian` on PATH
-claude-guardian install                             # wires the status line
+npm install -g .                                    # puts `guardian` on PATH
+guardian install                             # wires the status line
 
 claude plugin marketplace add .                     # hooks, skill and /guardian commands
 claude plugin install claude-session-guardian@claude-session-guardian
@@ -118,6 +118,10 @@ startup.
 With only the binary you get the gauge and every CLI command, but nothing acts on its own:
 no seal at compaction, no spawn gate, no Stop brake. Those are the hooks.
 
+The install puts two names on PATH for the same binary: `guardian`, and `claude-guardian`
+for anyone whose PATH already has something called `guardian`. Everything below works with
+either.
+
 **Per project there is normally nothing to do** — the sensor creates its own state
 directory on the first tick and defaults the rest. The exception is a project that sets its
 own `statusLine` in `.claude/settings.json`, which replaces the user-level one outright and
@@ -125,7 +129,7 @@ leaves Guardian installed, hooked, and sensing nothing. One command fixes it, fr
 inside the project:
 
 ```bash
-claude-guardian init        # or /guardian init
+guardian init        # or /guardian init
 ```
 
 It takes over whichever settings layer actually decides the status line, writing to
@@ -142,7 +146,7 @@ and re-run by the sensor on every tick, with Guardian's segment appended:
 ```
 
 ```
-claude-guardian uninstall          # restores exactly what was there before
+guardian uninstall          # restores exactly what was there before
 claude plugin uninstall claude-session-guardian
 ```
 
@@ -281,7 +285,7 @@ Free and instant. One question: if this session died right now, could a fresh on
   [ok  ] sensor         21 sample(s), last updated just now
   [ok  ] handoff        sealed 2m ago — PreCompact (auto)
   [FAIL] next action    absent — the resuming session has to guess where to start
-                       → claude-guardian note --next "<the single most specific next step>"
+                       → guardian note --next "<the single most specific next step>"
   [ok  ] files          14 tracked, 14 verifiable by hash
   [ok  ] checkpoint     refs/guardian/s1/… (`git show 2c9d9f7a`)
 

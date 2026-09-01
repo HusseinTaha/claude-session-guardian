@@ -62,7 +62,7 @@ function flag(argv: string[], name: string): string | null {
   return i >= 0 ? (argv[i + 1] ?? null) : null;
 }
 
-const USAGE = `claude-guardian <command>
+const USAGE = `guardian <command>
 
 Sensor and status
   sense                    statusLine sensor: reads the payload on stdin, updates
@@ -427,7 +427,7 @@ function main(argv: string[]): number {
       out(`  manifest:      ${latestPath(projectDir)}\n`);
       if (!m.claude_supplied.next_action) {
         out('\nNo next action recorded. Add one so the next session does not have to guess:\n');
-        out('  claude-guardian note --next "<the single most specific next step>"\n');
+        out('  guardian note --next "<the single most specific next step>"\n');
       }
       return 0;
     }

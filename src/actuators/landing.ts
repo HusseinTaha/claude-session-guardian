@@ -25,7 +25,7 @@ export function injectionFor(state: GuardianState, cfg: GuardianConfig): string 
       return (
         `[Guardian: EMERGENCY — ${state.reason}] The next request may be refused. ` +
         `Do one thing: record the next action with ` +
-        `\`claude-guardian note --next "..."\` and seal with \`/guardian handoff\`. ` +
+        `\`guardian note --next "..."\` and seal with \`/guardian handoff\`. ` +
         `Start nothing else.`
       );
 
@@ -44,7 +44,7 @@ function LANDING_PROTOCOL(state: GuardianState): string {
     'Land the work. In this order:',
     '1. Bring the current operation to a stopping point. Do not start another.',
     '2. Record what cannot be observed from the files:',
-    '   `claude-guardian note --next "<the single most specific next step>"`',
+    '   `guardian note --next "<the single most specific next step>"`',
     '   Add `--gotcha` or `--decision` for anything a fresh session would get wrong.',
     '3. Seal it: `/guardian handoff`.',
     '',
@@ -82,8 +82,8 @@ export function forceSealInstruction(state: GuardianState): string {
   return (
     `Session Guardian is in ${state.mode} (${state.reason}) and no handoff has been sealed. ` +
     `Before stopping, do exactly this and nothing more: record the next action with ` +
-    `\`claude-guardian note --next "<the single most specific next step>"\`, then run ` +
-    `\`claude-guardian handoff --reason "${state.mode}"\`. Then stop.`
+    `\`guardian note --next "<the single most specific next step>"\`, then run ` +
+    `\`guardian handoff --reason "${state.mode}"\`. Then stop.`
   );
 }
 

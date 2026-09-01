@@ -54,5 +54,5 @@ validates, and hand-editing does not.
 
 If a Guardian brief has appeared saying LAND, EMERGENCY or HARD_STOPPED, follow the
 `guardian-protocol` skill. In short: record the next action with
-`claude-guardian note --next "..."`, then `/guardian handoff`. Guardian already has the
+`guardian note --next "..."`, then `/guardian handoff`. Guardian already has the
 files, commands, commits, tasks and tests — intent is the only thing it cannot observe.

@@ -5,6 +5,7 @@
   "license": "MIT",
   "type": "module",
   "bin": {
+    "guardian": "dist/guardian.cjs",
     "claude-guardian": "dist/guardian.cjs"
   },
   "files": [
