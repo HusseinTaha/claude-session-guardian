@@ -553,7 +553,18 @@ function main(argv: string[]): number {
       const file = flag(argv, '--settings') ?? findGuardianSettings(projectDir) ?? settingsFile;
       const restored = uninstall(projectDir, file);
       const refs = removeCheckpoints(projectDir);
-      out(`Guardian uninstalled.\n${restored ? `  restored: ${restored}\n` : '  statusLine removed\n'}`);
+      // Say which of the two actually happened. When Guardian was only an override layer,
+      // nothing is written back — the file below it simply decides again, and calling that
+      // "restored" would describe a write that did not occur.
+      const wroteBack = existsSync(file) && readFileSync(file, 'utf8').includes('"statusLine"');
+      out('Guardian uninstalled.\n');
+      out(
+        restored
+          ? wroteBack
+            ? `  restored: ${restored}\n`
+            : `  override removed from ${file}\n  back in charge: ${restored}\n`
+          : '  statusLine removed\n',
+      );
       out(`  checkpoint refs deleted: ${refs}\n`);
       out(`  state left in place at ${stateDir(projectDir)} (delete it to remove all traces)\n`);
       return 0;

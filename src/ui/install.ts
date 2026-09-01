@@ -208,10 +208,19 @@ export function uninstall(projectDir: string, settingsFile = userSettingsPath())
   const cfg = loadConfig(projectDir);
   const restore = cfg.statusline.chained_command;
 
+  // Writing the displaced command back is right only when this file is where it lived.
+  // `init` writes settings.local.json purely as an override, and restoring there would
+  // leave a personal copy of the repo's own status line pinned above the repo's — so the
+  // day someone changes the shared one, the stale copy silently keeps winning. When a
+  // lower layer already says exactly this, the override is simply removed.
+  const owned = !settingsChain(projectDir)
+    .slice(0, Math.max(0, settingsChain(projectDir).indexOf(settingsFile)))
+    .some((f) => (readJson(f).statusLine as { command?: string } | undefined)?.command === restore);
+
   const sub = settings.subagentStatusLine as { command?: string } | undefined;
   let changed = false;
   if (typeof existing?.command === 'string' && existing.command.includes(MARKER)) {
-    if (restore) settings.statusLine = { type: 'command', command: restore };
+    if (restore && owned) settings.statusLine = { type: 'command', command: restore };
     else delete settings.statusLine;
     changed = true;
   }

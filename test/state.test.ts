@@ -141,6 +141,25 @@ test('init wires whichever settings file actually decides the status line', () =
   assert.equal(loadConfig(dir).statusline.chained_command, 'repo-bar.cjs');
 });
 
+test('uninstall removes an override layer rather than copying the repo bar into it', () => {
+  const dir = tmp();
+  const projSettings = join(dir, '.claude', 'settings.json');
+  const localSettings = join(dir, '.claude', 'settings.local.json');
+  mkdirSync(dirname(projSettings), { recursive: true });
+  writeFileSync(projSettings, JSON.stringify({ statusLine: { type: 'command', command: 'repo-bar.cjs' } }));
+
+  init(dir, join(dir, 'user-settings.json'));
+  uninstall(dir, localSettings);
+
+  // Restoring `repo-bar.cjs` into settings.local.json would pin a personal copy above the
+  // repo's own, and the day the shared one changes the stale copy silently keeps winning.
+  const local = JSON.parse(readFileSync(localSettings, 'utf8'));
+  assert.equal('statusLine' in local, false, JSON.stringify(local));
+  assert.equal('subagentStatusLine' in local, false);
+  // And the repo's file is what decides again, untouched throughout.
+  assert.equal(JSON.parse(readFileSync(projSettings, 'utf8')).statusLine.command, 'repo-bar.cjs');
+});
+
 test('init on a project with no settings of its own leaves the user file deciding', () => {
   const dir = tmp();
   const userSettings = join(dir, 'user-settings.json');
