@@ -3,11 +3,11 @@
 Sees every Claude Code exhaustion wall coming **with time-to-impact**, not just a percentage,
 and lands the session before it hits.
 
-> Status: **Phases 1–4 complete** — sensor and time-to-wall engine; observation ledger,
-> handoff manifest, lossless compaction, resume with verification, git checkpoints;
-> per-agent sensing, the spawn gate, self-checkpointing subagents; tiered injection, the
-> Stop brake, 429 detection with a reset countdown, and a validated config CLI.
-> Phase 5 (`doctor` cold-resume harness) is specified but not built.
+> Status: **complete** — all five phases. Sensor and time-to-wall engine; observation
+> ledger, handoff manifest, lossless compaction, verified resume, git checkpoints; per-agent
+> sensing, the spawn gate, self-checkpointing subagents; tiered injection, the Stop brake,
+> 429 recovery; a validated config CLI, the `doctor` self-check with a cold-resume harness,
+> and an optional three-tool MCP server. 189 tests.
 >
 > **[Full user guide with examples →](docs/GUIDE.md)**
 
@@ -233,6 +233,34 @@ the moment it has a default and the two cannot drift apart. Unknown keys are rep
 than ignored — a typo in `config.json` is otherwise silent, which is the whole reason to
 prefer the CLI over the file.
 
+## Does it actually work?
+
+```
+/guardian doctor
+```
+
+Free and instant. One question: if this session died right now, could a fresh one continue?
+
+```
+  [ok  ] sensor         21 sample(s), last updated just now
+  [ok  ] handoff        sealed 2m ago — PreCompact (auto)
+  [FAIL] next action    absent — the resuming session has to guess where to start
+                       → claude-guardian note --next "<the single most specific next step>"
+  [ok  ] files          14 tracked, 14 verifiable by hash
+  [ok  ] checkpoint     refs/guardian/s1/… (`git show 2c9d9f7a`)
+
+NOT RESUMABLE — 1 problem(s) would stop a fresh session from continuing this work.
+```
+
+Every `FAIL` carries the command that fixes it. A missing next action is a failure, not a
+warning: it is the one field nothing else substitutes for.
+
+`--cold` goes further and tests the parachute. It builds a scratch worktree at the
+checkpoint, drops in only the digest, and runs a fresh `claude -p` that has never seen the
+session — then prints what it concluded. The two mechanical checks are keyword overlap, not
+comprehension; the value is reading what a cold reader actually understood. If a model with
+no memory of the work cannot say what to do next, neither could you tomorrow.
+
 ## Design rules
 
 **Fail open.** A watchdog that breaks the session it watches is worse than no watchdog.
@@ -257,7 +285,7 @@ it holds prompts and paths and does not belong in a commit.
 ## Development
 
 ```bash
-npm run check      # typecheck + build + 159 tests
+npm run check      # typecheck + build + 189 tests
 ```
 
 `GUARDIAN_NOW=<epoch>` replays a session at its original timestamps, which is how the mode
@@ -282,4 +310,6 @@ src/senseAgents.ts  the subagentStatusLine sensor
 src/gate.ts     the spawn gate and boundary marking
 src/landing.ts  tiered injection, the Stop brake, 429 tombstone parsing
 src/configCmd.ts  config get/set/unset with validation
+src/doctor.ts   the self-check and the cold-resume harness
+src/mcp.ts      optional three-tool MCP server, off by default
 ```

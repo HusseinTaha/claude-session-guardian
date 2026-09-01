@@ -1,0 +1,9 @@
+{
+  "$comment": "Optional. Guardian works fully without MCP; the hooks cover the workflow. This exists so Claude can ask about the budget on purpose rather than wait to be told. Copy the mcpServers block into your own .mcp.json or .claude/settings.json, replacing the path. It is not shipped as the plugin's .mcp.json, so it stays off unless you enable it deliberately.",
+  "mcpServers": {
+    "guardian": {
+      "command": "node",
+      "args": ["/absolute/path/to/claude-session-guardian/dist/guardian.cjs", "mcp"]
+    }
+  }
+}

@@ -1,5 +1,4 @@
-import { readFileSync, readdirSync, statSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync, existsSync } from 'node:fs';
 import { sense } from './sense.ts';
 import { senseAgents } from './senseAgents.ts';
 import { install, uninstall, guardianCommand } from './install.ts';
@@ -8,6 +7,8 @@ import { readState } from './state.ts';
 import { renderDashboard } from './render.ts';
 import { statePath, userSettingsPath, resolveStateRoot, stateDir } from './paths.ts';
 import { handle } from './hooks.ts';
+import { latestSessionIn as latestSession } from './sessions.ts';
+import { serve as serveMcp } from './mcp.ts';
 import { appendEvent, type NoteField } from './ledger.ts';
 import {
   seal,
@@ -19,6 +20,13 @@ import {
 } from './manifest.ts';
 import { removeCheckpoints, listCheckpoints } from './git.ts';
 import { countdown } from './landing.ts';
+import {
+  audit,
+  renderChecks,
+  verdict,
+  coldResume,
+  logTail,
+} from './doctor.ts';
 import { readAgents, typeStats } from './agents.ts';
 import {
   flatten,
@@ -47,33 +55,6 @@ function readStdin(): string {
 function now(): number {
   const override = Number(process.env.GUARDIAN_NOW);
   return Number.isFinite(override) && override > 0 ? override : Date.now() / 1000;
-}
-
-/** Most recent session in this project, for commands invoked outside a hook where no
- *  session id is on hand.
- *
- *  Must consider ledgers as well as state files: hooks create a ledger from the first tool
- *  call, while the state file only appears once the status line has run. Looking at state
- *  files alone sent `note` to a phantom session, so the objective and next action never
- *  reached the sealed manifest. */
-function latestSession(projectDir: string): string | null {
-  // Longest first: `s1.agents.json` must not be read as a session named `s1.agents`.
-  const SUFFIXES = ['.ledger.jsonl', '.agents.json', '.json'];
-  try {
-    const dir = join(stateDir(projectDir), 'sessions');
-    const seen = new Map<string, number>();
-    for (const f of readdirSync(dir)) {
-      const suffix = SUFFIXES.find((x) => f.endsWith(x));
-      if (!suffix) continue;
-      const sid = f.slice(0, -suffix.length);
-      if (!sid) continue;
-      const mtime = statSync(join(dir, f)).mtimeMs;
-      seen.set(sid, Math.max(seen.get(sid) ?? 0, mtime));
-    }
-    return [...seen.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
-  } catch {
-    return null;
-  }
 }
 
 function flag(argv: string[], name: string): string | null {
@@ -110,6 +91,11 @@ Configuration
   config path              print the config file path
   on | off                 enable or disable Guardian for this project
 
+Diagnostics
+  doctor [--cold] [--seal] print a self-check: could a fresh session resume this work?
+         [--keep] [--strict]  --cold additionally cold-resumes it with claude -p
+  log [--lines N]          tail Guardian log (empty unless something failed)
+
 Setup
   install [--settings P]   point statusLine at Guardian, preserving any existing one
   uninstall [--settings P] restore the previous statusLine and delete checkpoint refs
@@ -118,6 +104,7 @@ Setup
 
 Internal
   hook <EventName>         hook dispatch; reads the event payload on stdin
+  mcp                      run the optional MCP server on stdio (3 tools)
   agents                   show live subagents and historical durations by type
 `;
 
@@ -306,6 +293,83 @@ function cmdConfig(projectDir: string, argv: string[], out: (s: string) => void)
   }
 }
 
+
+/** `guardian doctor` — the only check that covers what none of the unit tests can: whether
+ *  a fresh session could actually pick this work up. */
+function cmdDoctor(projectDir: string, argv: string[], out: (s: string) => void): number {
+  const cold = argv.includes('--cold');
+  const keep = argv.includes('--keep');
+  const strict = argv.includes('--strict');
+
+  if (argv.includes('--seal')) {
+    const sid = latestSession(projectDir);
+    if (sid) {
+      seal(projectDir, sid, readState(projectDir, sid), 'doctor --seal', now());
+      out('Sealed a fresh handoff first.\n\n');
+    }
+  }
+
+  const sid = latestSession(projectDir);
+  const state = sid ? readState(projectDir, sid) : null;
+  const checks = audit(projectDir, state, now());
+
+  out('Guardian self-check\n');
+  out(`  project: ${projectDir}\n\n`);
+  out(`${renderChecks(checks)}\n\n`);
+
+  const v = verdict(checks);
+  out(`${v.text}\n`);
+
+  if (!cold) {
+    out('\nThat was the static audit, which costs nothing. To test the handoff for real —\n');
+    out('cold-resume it in a scratch worktree with a fresh model that has never seen this\n');
+    out('session — run `/guardian doctor --cold`. That spends real budget.\n');
+    return strict && !v.resumable ? 1 : 0;
+  }
+
+  const m = readLatest(projectDir);
+  if (!m) {
+    out('\nNo manifest to cold-resume.\n');
+    return 1;
+  }
+
+  out('\nCold resume: building a scratch worktree at the checkpoint and asking a fresh\n');
+  out('session what it would do, with only the handoff to go on...\n\n');
+
+  const r = coldResume(projectDir, m, { keep });
+  if (!r.ok) {
+    out(`  [FAIL] cold resume: ${r.detail}\n`);
+    return 1;
+  }
+
+  out(`  [ok  ] cold resume    ${r.detail}\n`);
+  out(
+    `  [${r.echoedNextAction ? 'ok  ' : 'warn'}] next action    ${
+      r.echoedNextAction
+        ? 'the cold session restated the recorded next action'
+        : 'the cold session did not clearly restate the recorded next action'
+    }\n`,
+  );
+  out(
+    `  [${r.namedAFile ? 'ok  ' : 'warn'}] files          ${
+      r.namedAFile
+        ? 'it named at least one file the manifest records'
+        : 'it named none of the files the manifest records'
+    }\n`,
+  );
+  if (keep && r.worktree) out(`\n  worktree kept at ${r.worktree}\n`);
+
+  out('\n--- what the cold session said ---\n');
+  out(`${r.answer}\n`);
+  out('--- end ---\n\n');
+  out('Those two checks are keyword overlap, not comprehension. Read the answer: if a\n');
+  out('model with no memory of this work could not say what to do next, neither could you\n');
+  out('tomorrow, and the manifest needs a better `note --next`.\n');
+
+  const failed = !r.echoedNextAction || !r.namedAFile || !v.resumable;
+  return strict && failed ? 1 : 0;
+}
+
 function main(argv: string[]): number {
   const cmd = argv[0] ?? 'help';
   const out = (s: string) => process.stdout.write(s);
@@ -363,6 +427,20 @@ function main(argv: string[]): number {
         out('\nNo next action recorded. Add one so the next session does not have to guess:\n');
         out('  claude-guardian note --next "<the single most specific next step>"\n');
       }
+      return 0;
+    }
+
+    case 'mcp':
+      // Blocks on stdin until the client disconnects.
+      serveMcp(now);
+      return 0;
+
+    case 'doctor':
+      return cmdDoctor(projectDir, argv, out);
+
+    case 'log': {
+      const n = Number(flag(argv, '--lines') ?? 40);
+      out(`${logTail(projectDir, Number.isFinite(n) ? n : 40)}\n`);
       return 0;
     }
 
@@ -494,7 +572,7 @@ function main(argv: string[]): number {
       return 0;
 
     case 'version':
-      out('0.2.0\n');
+      out('0.5.0\n');
       return 0;
 
     default:

@@ -17,6 +17,7 @@ close, it seals a handoff so the next session can pick the work up exactly where
 - [When a rate limit hits anyway](#when-a-rate-limit-hits-anyway)
 - [Configuration](#configuration)
 - [Command reference](#command-reference)
+- [Checking that it works](#checking-that-it-works)
 - [Troubleshooting](#troubleshooting)
 - [What Guardian does not do](#what-guardian-does-not-do)
 
@@ -750,12 +751,37 @@ echo '{ "enabled": false }' > .claude/guardian/config.json
 | `claude-guardian note --objective\|--next\|--decision\|--gotcha <text>` | Record intent |
 | `/guardian wait` | Countdown to a rate-limit window reopening |
 | `/guardian config [get\|set\|unset\|reset\|check\|path]` | Read and change settings, validated |
+| `/guardian doctor [--cold] [--seal] [--strict]` | Could a fresh session resume this work? |
+| `/guardian log [--lines N]` | Tail Guardian's own log |
 | `/guardian on` / `off` | Enable or disable Guardian for this project |
 | `claude-guardian agents` | Live subagents, plus historical duration by agent type |
 | `claude-guardian checkpoints` | List git checkpoint refs |
 | `claude-guardian where` | Print the command `install` configures |
 
-`sense`, `sense-agents` and `hook <Event>` are internal; Claude Code invokes them.
+`sense`, `sense-agents`, `hook <Event>` and `mcp` are internal; Claude Code invokes them.
+
+### Optional MCP server
+
+Guardian works fully without it — the hooks cover the workflow. The server exists so
+Claude can ask about the budget *on purpose* rather than wait to be told, and it ships
+**off**. To enable it, copy the block from `mcp/guardian.mcp.json` into your own
+`.mcp.json`, replacing the path:
+
+```json
+{
+  "mcpServers": {
+    "guardian": {
+      "command": "node",
+      "args": ["/path/to/claude-session-guardian/dist/guardian.cjs", "mcp"]
+    }
+  }
+}
+```
+
+It exposes exactly three tools: `guardian_status`, `guardian_checkpoint` and
+`guardian_resume_context`. Three, not fourteen, because every tool schema is resident
+context in every request — a large MCP surface would spend budget on every turn, which is
+self-defeating in a tool whose whole purpose is conserving it.
 
 ### Where things live
 
@@ -777,6 +803,108 @@ echo '{ "enabled": false }' > .claude/guardian/config.json
 ```
 
 ---
+
+## Checking that it works
+
+A handoff system nobody has tested is a handoff system that does not work, and the failure
+mode is silence — you discover it at the worst possible moment.
+
+```
+/guardian doctor
+```
+
+Free, instant, and answers one question: **if this session died right now, could a fresh one
+continue?**
+
+```
+Guardian self-check
+  project: C:\proj
+
+  [ok  ] status line    points at Guardian
+  [ok  ] agent rows     per-agent sensing is wired
+  [ok  ] enabled        Guardian is active for this project
+  [ok  ] config         valid
+  [ok  ] sensor         21 sample(s), last updated just now
+  [ok  ] rate limits    account usage is being reported
+  [ok  ] burn rate      measurable, so time-to-wall is real
+  [ok  ] handoff        sealed 2m ago — PreCompact (auto)
+  [FAIL] next action    absent — the resuming session has to guess where to start
+                       → claude-guardian note --next "<the single most specific next step>"
+  [warn] objective      absent; the resuming session knows the steps but not the goal
+  [ok  ] files          14 tracked, 14 verifiable by hash
+  [ok  ] workspace      matches the sealed manifest
+  [ok  ] test baseline  `npm test` — passing
+  [ok  ] checkpoint     refs/guardian/s1/2026-09-01T09-12-34-000Z (`git show 2c9d9f7a`)
+  [ok  ] digest         the injectable summary exists
+
+NOT RESUMABLE — 1 problem(s) would stop a fresh session from continuing this work.
+```
+
+Every `FAIL` line carries the command that fixes it. A missing next action is a **failure**,
+not a warning, because it is the one field nothing else substitutes for.
+
+`doctor` also catches the quieter problems:
+
+| Line | What it means |
+|---|---|
+| `checkpoint ... no longer exists` | The ref was deleted. Uncommitted work at seal time is gone. |
+| `workspace 3 file(s) changed` | Someone edited outside the handoff. Reconcile on resume. |
+| `in flight` | An irreversible operation started and was never seen to return. |
+| `agents ... still running at seal time` | Their work is lost; they are recorded, not resumable. |
+| `test baseline FAILING at seal time` | You are resuming onto a red build. Say so, don't hide it. |
+
+Useful flags: `--seal` seals a fresh handoff first; `--strict` exits nonzero, for a hook or
+CI; `--keep` leaves the cold-resume worktree in place.
+
+### Testing the parachute for real
+
+The static audit checks that the manifest has the right *shape*. It cannot tell you whether
+the words in it are any good. For that:
+
+```
+/guardian doctor --cold
+```
+
+This builds a scratch git worktree at the checkpoint, drops in only the handoff digest,
+and runs a **fresh `claude -p` that has never seen this session** — asking it what the next
+action is, which files it would touch, and what it cannot determine.
+
+```
+  [ok  ] cold resume    a cold session read the handoff and answered
+  [ok  ] next action    the cold session restated the recorded next action
+  [warn] files          it named none of the files the manifest records
+
+--- what the cold session said ---
+The next action is to finish rotateRefreshToken() in the auth module — the happy
+path is done and the reuse-detection branch is unwritten. I cannot determine which
+test command to run, or whether the token store schema was already migrated.
+--- end ---
+
+Those two checks are keyword overlap, not comprehension. Read the answer: if a
+model with no memory of this work could not say what to do next, neither could you
+tomorrow, and the manifest needs a better `note --next`.
+```
+
+Two things to be clear about. It **spends real budget** — it is a full model call, so it is
+opt-in and not something to run near a wall. And the two mechanical checks are keyword
+overlap, nothing more; Guardian does not claim to grade the answer's meaning. The value is
+in reading what a cold reader actually concluded, which tells you more about your manifest
+than any score would.
+
+The gap that shows up most often is a vague next action:
+
+- `"Continue working on auth"` — the cold session says it cannot determine where to start.
+- `"Finish rotateRefreshToken() in src/auth/refresh.ts:88 — happy path works, the
+  reuse-detection branch is unwritten. Then run npm test -- auth."` — it starts immediately.
+
+### The log
+
+```
+/guardian log
+```
+
+Empty is the healthy state: every hook fails open silently, so anything in here is something
+that went wrong and was swallowed rather than allowed to break the session.
 
 ## Troubleshooting
 
@@ -825,8 +953,12 @@ run `/guardian handoff`, or disable it with
 `/guardian off` silences it entirely while leaving it installed.
 
 **Something is wrong and I want the log.**
-`.claude/guardian/logs/guardian.log`. It is empty unless something threw — every hook
-fails open, so failures are silent by design.
+`/guardian log`, or `.claude/guardian/logs/guardian.log`. It is empty unless something threw
+— every hook fails open, so failures are silent by design.
+
+**I want to know whether any of this actually works.**
+`/guardian doctor`. It is free and instant. `/guardian doctor --cold` goes further and
+cold-resumes the handoff with a fresh model, at the cost of a real model call.
 
 ---
 
@@ -861,3 +993,8 @@ makes no claim to have seen it coming.
 
 **It cannot see account usage your plan does not report.** There is exactly one live feed
 for rate limits, and if your plan omits it, Guardian says `unknown` rather than guessing.
+
+**It does not grade your handoff's prose.** `doctor --cold` shows you what a cold reader
+concluded and checks two things mechanically — whether it echoed the next action, whether it
+named a recorded file. Judging whether the manifest is *good* is left to you, because a
+keyword score dressed up as comprehension would be worse than no score.

@@ -1,6 +1,6 @@
 {
   "name": "claude-session-guardian",
-  "version": "0.1.0",
+  "version": "0.5.0",
   "description": "Sees every Claude Code exhaustion wall coming with time-to-impact, and lands the session before it hits.",
   "license": "MIT",
   "type": "module",
@@ -8,13 +8,14 @@
     "claude-guardian": "dist/guardian.cjs"
   },
   "files": [
-    "dist/",
     ".claude-plugin/",
-    "hooks/",
+    "README.md",
     "commands/",
-    "skills/",
+    "dist/",
+    "hooks/",
+    "mcp/",
     "settings.json",
-    "README.md"
+    "skills/"
   ],
   "engines": {
     "node": ">=18"
