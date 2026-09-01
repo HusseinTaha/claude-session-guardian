@@ -1,9 +1,9 @@
-import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, existsSync, readdirSync, statSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import type { GuardianState } from '../types.ts';
 import { readLedger, hashFile, testCommand, type LedgerEvent } from './ledger.ts';
 import { checkpoint, headMatches, type CheckpointResult } from './git.ts';
-import { handoffDir, ensureGuardianDir } from '../core/paths.ts';
+import { handoffDir, ensureGuardianDir, stateDir } from '../core/paths.ts';
 import { fmtMin } from '../budget/mode.ts';
 
 const BACKSLASH = /\\/g;
@@ -38,6 +38,9 @@ export interface Manifest {
     commits: Array<{ sha: string; subject: string }>;
     commands: Array<{ command: string; kind: string; ok: boolean | null; t: number }>;
     tests: { command: string; ok: boolean | null; at: number } | null;
+    /** What each agent wrote down for itself while it worked. An agent cannot be resumed,
+     *  but the ground it covered does not have to be walked twice. */
+    agent_notes: Array<{ file: string; updated_at: number; excerpt: string }>;
     checkpoint: CheckpointResult | null;
     /** Irreversible operations that began and were never seen to return. */
     in_flight_at_seal: Array<{ command: string; started_at: number }>;
@@ -52,6 +55,43 @@ export interface Manifest {
   }>;
   claude_supplied: { next_action: string | null; open_decisions: string[]; gotchas: string[] };
   resume_protocol: string[];
+}
+
+const NOTE_EXCERPT = 1500;
+
+/** Collect what the agents wrote for themselves.
+ *
+ *  Near a wall Guardian tells every new subagent to record findings in
+ *  `.claude/guardian/agent-notes/` as it goes, because an agent cut off at minute four of
+ *  an eighteen-minute task should leave something behind. Those files were being written
+ *  and never read: the handoff carried "agent X was running" and not one line of what X had
+ *  established. An agent still cannot be resumed — its state is its context — but the next
+ *  session can pick up the ground it covered instead of sending someone over it again. */
+function readAgentNotes(projectDir: string): Manifest['observed']['agent_notes'] {
+  const dir = join(stateDir(projectDir), 'agent-notes');
+  let names: string[];
+  try {
+    names = readdirSync(dir).filter((f) => f.endsWith('.md'));
+  } catch {
+    return [];
+  }
+  const out: Manifest['observed']['agent_notes'] = [];
+  for (const name of names) {
+    const file = join(dir, name);
+    try {
+      const text = readFileSync(file, 'utf8').trim();
+      if (!text) continue;
+      out.push({
+        file: toPosix(relative(projectDir, file)),
+        updated_at: Math.floor(statSync(file).mtimeMs / 1000),
+        excerpt: text.length > NOTE_EXCERPT ? `${text.slice(0, NOTE_EXCERPT)}
+…` : text,
+      });
+    } catch {
+      /* unreadable: it contributes nothing, and a seal must not fail over it */
+    }
+  }
+  return out.sort((a, b) => b.updated_at - a.updated_at);
 }
 
 function notes(events: LedgerEvent[], field: string): string[] {
@@ -168,6 +208,7 @@ export function buildManifest(
       commits,
       commands: commands.slice(-25),
       tests,
+      agent_notes: readAgentNotes(projectDir),
       checkpoint: cp,
       in_flight_at_seal: [...boundaries.entries()].map(([command, started_at]) => ({
         command,
@@ -353,6 +394,22 @@ export function renderDigest(m: Manifest, projectDir: string): string {
       if (a.summary) L.push(`  ${a.summary}`);
     }
     L.push('');
+  }
+
+  // Verbatim, and last among the observed sections: this is the only place the handoff
+  // carries an agent's own account of where it got to, and paraphrasing it would be
+  // inventing progress. An agent cannot be restarted from where it stopped — but whoever
+  // picks the work up does not have to rediscover what it already established.
+  if (m.observed.agent_notes.length) {
+    L.push('## What the agents wrote down');
+    L.push('');
+    L.push('Their own notes, kept as they worked. Read these before re-running any agent:');
+    L.push('');
+    for (const n of m.observed.agent_notes) {
+      L.push(`### ${n.file}`);
+      L.push(n.excerpt);
+      L.push('');
+    }
   }
 
   if (m.claude_supplied.open_decisions.length) {

@@ -377,3 +377,27 @@ test('notes reach the session the hooks are actually recording into', () => {
   });
   assert.equal(m.claude_supplied.next_action, 'Finish token rotation');
 });
+
+test("an agent's own notes travel in the handoff", () => {
+  const dir = tmp();
+  const notes = join(dir, '.claude', 'guardian', 'agent-notes');
+  mkdirSync(notes, { recursive: true });
+  writeFileSync(
+    join(notes, 'map-call-sites.md'),
+    [
+      'Established: recordSample is called from statusline.ts:64 only.',
+      'Next: check subagents.ts.',
+    ].join(String.fromCharCode(10)),
+  );
+
+  // Guardian tells agents near a wall to keep these files current, then never read them
+  // back: the handoff said "agent X was running" and not one line of what X had found.
+  const m = seal(dir, 's1', emptyState('s1'), 'r', T, { git: false });
+  assert.equal(m.observed.agent_notes.length, 1);
+  assert.match(m.observed.agent_notes[0]!.file, /agent-notes\/map-call-sites\.md/);
+  assert.match(m.observed.agent_notes[0]!.excerpt, /statusline\.ts:64/);
+
+  const digest = renderDigest(m, dir);
+  assert.match(digest, /What the agents wrote down/);
+  assert.match(digest, /Next: check subagents\.ts/);
+});

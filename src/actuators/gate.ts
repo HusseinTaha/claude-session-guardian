@@ -50,10 +50,15 @@ export function checkpointNote(state: GuardianState, notesDir: string): string {
     '',
     '---',
     `Budget note from Session Guardian: this session is at ${budgetPhrase(state)}.`,
-    'Work so that being cut off early still leaves something useful:',
-    `- Write findings to \`${notesDir}\` as you go, rather than only at the end.`,
-    '- Prefer returning a partial answer over returning nothing.',
-    '- Do not start work you cannot bring to a reportable state quickly.',
+    'You may be cut off mid-task. Nothing can pause you and nothing can resume you, so the',
+    `only thing that survives is what you have written down. Keep \`${notesDir}\` current as`,
+    'you work — not a summary at the end — and write it for someone who has to take over',
+    'without ever having seen your context:',
+    '- What you have established so far, with the file paths and findings that back it.',
+    '- What you were doing at that moment, and the next concrete step you would have taken.',
+    '- What you ruled out, so nobody spends the budget ruling it out again.',
+    'Then: prefer returning a partial answer over returning nothing, and do not start work',
+    'you cannot bring to a reportable state quickly.',
   ].join('\n');
 }
 
