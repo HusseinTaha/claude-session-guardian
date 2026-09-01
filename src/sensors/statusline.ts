@@ -181,6 +181,22 @@ function runChained(cmd: string, stdin: string, projectDir: string, cfg: Guardia
   }
 }
 
+/** Run the chained command once, the way a tick does, and say whether anything came back.
+ *
+ *  `doctor` reported `status line — points at Guardian` while the segment Guardian chained
+ *  had failed on every tick for two hours: true, and beside the point. Checking that
+ *  Guardian is wired is not the same as checking that what it displaced still runs. */
+export function probeChained(
+  projectDir: string,
+  cfg: GuardianConfig,
+): { cmd: string | null; ok: boolean } {
+  const cmd = liveChainedCommand(cfg, projectDir);
+  if (!cmd) return { cmd: null, ok: true };
+  const payload = JSON.stringify({ session_id: 'guardian-doctor', cwd: projectDir });
+  const text = runChained(cmd, payload, projectDir, cfg);
+  return { cmd, ok: text !== '' && text !== '⋯' };
+}
+
 /** The command to chain, preferring what its source file says *now* over what it said when
  *  Guardian displaced it.
  *

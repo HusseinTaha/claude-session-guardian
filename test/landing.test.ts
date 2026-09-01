@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -200,8 +200,10 @@ test('Stop stays out of the way when there is nothing to force', () => {
     assert.equal(hook('Stop', { session_id: `sess-${m}`, cwd: dir }, T).exit, 0, m);
   }
 
-  // Already sealed: there is nothing left to ask for.
+  // Sealed AND carrying a next action: there is nothing left to ask for.
+  appendEvent(dir, 'sealed', { k: 'note', t: T - 20, field: 'next_action', text: 'finish the branch' });
   writeState(dir, { ...stateAt('LAND'), session_id: 'sealed', manifest: { sealed_at: T - 10 } });
+  seal(dir, 'sealed', stateAt('LAND'), 'manual', T - 10, { git: false });
   assert.equal(hook('Stop', { session_id: 'sealed', cwd: dir }, T).exit, 0);
 });
 
@@ -496,4 +498,51 @@ test('a failed auto-seal is not retried on every tool call after it', () => {
   const st = readState(dir, 's1');
   // The latch is written before the seal, precisely so a broken seal cannot storm.
   assert.equal(st.latches.auto_sealed, true, 'the latch must be set even when the seal fails');
+});
+
+// A sealed manifest used to disarm this brake, and auto-seal produces one on the way into
+// LAND -- so the refusal stopped firing exactly when it mattered, and with it the only
+// prompt that ever asks for the one thing Guardian cannot observe.
+test('Stop still refuses when a manifest is sealed but carries no next action', () => {
+  const dir = tmp();
+  writeState(dir, { ...stateAt('LAND'), manifest: { sealed_at: T - 10 } });
+  seal(dir, 's1', stateAt('LAND'), 'auto-seal (LAND)', T - 10, { git: false });
+
+  const r = hook('Stop', { session_id: 's1', cwd: dir }, T);
+  assert.equal(r.exit, 2, 'an automatic seal cannot have the intent; it precedes it');
+  assert.match(r.stderr!, /note --next/);
+});
+
+test("Stop ignores a previous session's next action", () => {
+  const dir = tmp();
+  appendEvent(dir, 'older', { k: 'note', t: T - 200, field: 'next_action', text: 'last session' });
+  seal(dir, 'older', stateAt('LAND'), 'manual', T - 100, { git: false });
+  writeState(dir, stateAt('LAND'));
+  assert.equal(hook('Stop', { session_id: 's1', cwd: dir }, T).exit, 2);
+});
+
+// ------------------------------------------------------------------ tool output
+
+test('a command verdict is read from tool_response, which is the field that arrives', () => {
+  const dir = tmp();
+  const payload = {
+    session_id: 's1',
+    cwd: dir,
+    tool_name: 'Bash',
+    tool_input: { command: 'npm test' },
+    tool_response: { stdout: 'pass 213, fail 0', interrupted: false },
+  };
+  hook('PostToolUse', payload, T);
+  const m = seal(dir, 's1', stateAt('NORMAL'), 'manual', T + 1, { git: false });
+  assert.equal(m.observed.tests?.ok, true, '154 of 154 commands recorded ok:null before this');
+  assert.equal(m.observed.tests?.command, 'npm test');
+});
+
+test('a missing tool output is recorded as unclear and leaves a mark in the log', () => {
+  const dir = tmp();
+  hook('PostToolUse', { session_id: 's1', cwd: dir, tool_name: 'Bash', tool_input: { command: 'npm test' } }, T);
+  const m = seal(dir, 's1', stateAt('NORMAL'), 'manual', T + 1, { git: false });
+  assert.equal(m.observed.tests?.ok, null, 'an invented verdict is worse than an absent one');
+  const log = readFileSync(join(dir, '.claude', 'guardian', 'logs', 'guardian.log'), 'utf8');
+  assert.match(log, /carried no tool output; keys: /);
 });

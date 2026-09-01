@@ -105,6 +105,33 @@ reconstruction still reads far below the wall. None is an estimator blind spot.
   `landing.inject_from land` used to be accepted and silently matched nothing, which made
   Guardian inject at every mode rather than the one asked for.
 
+### Found by using the auto-seal
+
+- **A command's verdict was never read on a real machine: 154 of 154 recorded commands had
+  `ok: null`.** Guardian read `tool_output`; PostToolUse carries `tool_response`. Every
+  handoff said "test baseline — result unclear", and `inferOk`'s "0 failures is a success"
+  logic was dead in production while passing in tests, which synthesized the field. Both
+  fields are accepted now, an object is stringified rather than dropped, and a payload with
+  no output at all leaves the keys that did arrive in the log.
+- **Auto-sealing disarmed the Stop brake.** `onStop` skipped when a manifest existed, and
+  auto-seal produces one on the way into LAND — so the refusal stopped firing exactly when
+  it mattered, and with it the only prompt that asks for a next action. The brake now refuses
+  while *this session's* manifest has no `next_action`, which is the thing Guardian cannot
+  observe; the seal covers everything it can.
+- **A digest with no stated next action now says what was in flight** — open tasks,
+  boundary commands that never returned, agents still running — under `Next action — NOT
+  STATED`, never as though someone had stated it.
+- **Checkpoints and sealed history are pruned to the last 20.** Every checkpoint ref pins a
+  whole tree and a reachable ref is one `git gc` cannot reclaim; before auto-seal a seal
+  happened once a session, now it happens on every climb.
+- **`doctor` gave a confident pass on a status line that had failed on every tick for two
+  hours.** It now runs the chained command itself and counts how often the log says Guardian
+  had to drop it, reports `chain source` when `chained_from` is unset (a snapshot Guardian
+  will run forever), and marks a handoff **stale** when work has been recorded after it — in
+  any session, since a resumed project seals under one id and works under another.
+- `npm run perf` covers PostToolUse, which now runs on every tool call rather than on edits
+  and shell commands only: p50 1.3ms.
+
 ### Found by using it
 
 Everything below was found by running the tool against real work, after the suite was

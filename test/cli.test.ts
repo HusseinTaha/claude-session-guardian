@@ -1,11 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sense } from '../src/sensors/statusline.ts';
+import { handle } from '../src/actuators/dispatch.ts';
 
 const BUNDLE = fileURLToPath(new URL('../dist/guardian.cjs', import.meta.url));
 
@@ -151,4 +152,28 @@ test('sensor compute stays far inside its budget', () => {
   // percentiles here measure CPU contention in CI rather than Guardian's own cost.
   console.log(`      sense() p50 ${at(0.5).toFixed(2)}ms  p95 ${at(0.95).toFixed(2)}ms`);
   assert.ok(at(0.5) < 25, `p50 compute was ${at(0.5).toFixed(2)}ms`);
+});
+
+/** PostToolUse is not the sensor, but it now runs on *every* tool call — reading state and
+ *  config even for a Read — because that is where the automatic seal decides whether it is
+ *  armed. Cheap, and measured, because the rule is that the paths on every event are. */
+test('the observe-and-maybe-seal path stays cheap on a calm session', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'guardian-perf-h-'));
+  mkdirSync(join(dir, '.claude', 'guardian'), { recursive: true });
+  const payload = JSON.stringify({
+    session_id: 'perf',
+    cwd: dir,
+    tool_name: 'Read',
+    tool_input: { file_path: join(dir, 'nothing.txt') },
+  });
+  const times: number[] = [];
+  for (let i = 0; i < 100; i++) {
+    const t = performance.now();
+    handle('PostToolUse', payload, 1_800_000_000 + i);
+    times.push(performance.now() - t);
+  }
+  times.sort((a, b) => a - b);
+  const p50 = times[Math.floor(times.length * 0.5)]!;
+  console.log(`      PostToolUse p50 ${p50.toFixed(2)}ms`);
+  assert.ok(p50 < 25, `p50 was ${p50.toFixed(2)}ms`);
 });

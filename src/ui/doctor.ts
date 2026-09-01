@@ -1,5 +1,6 @@
 import {
   readFileSync,
+  readdirSync,
   existsSync,
   mkdtempSync,
   rmSync,
@@ -15,8 +16,11 @@ import { loadConfig } from '../core/config.ts';
 import { readLatest, verify, latestDigestPath, type Manifest } from '../handoff/manifest.ts';
 import { listCheckpoints, isRepo } from '../handoff/git.ts';
 import { readUserConfig, validateConfig } from './configCmd.ts';
-import { userSettingsPath, stateDir, settingsChain } from '../core/paths.ts';
+import { userSettingsPath, stateDir, settingsChain, logPath } from '../core/paths.ts';
 import { typeStats } from '../sensors/agents.ts';
+import { readTail } from '../actuators/landing.ts';
+import { probeChained } from '../sensors/statusline.ts';
+
 
 export type CheckStatus = 'pass' | 'warn' | 'fail' | 'skip';
 
@@ -93,6 +97,38 @@ export function audit(
           fix: 'run `guardian init`',
         },
   );
+
+  if (cfg.statusline.manage && cfg.statusline.chain_existing) {
+    const probe = probeChained(projectDir, cfg);
+    const failures = recentChainFailures(projectDir, now);
+    if (probe.cmd) {
+      checks.push(
+        probe.ok && failures === 0
+          ? { name: 'chained bar', status: 'pass', detail: 'the status line Guardian chained still runs' }
+          : probe.ok
+            ? {
+                name: 'chained bar',
+                status: 'warn',
+                detail: `runs here, but was dropped ${failures} time(s) in the last 6h of real ticks`,
+                fix: 'see `guardian log`; the segment is missing from the bar whenever that happens',
+              }
+            : {
+              name: 'chained bar',
+              status: 'warn',
+              detail: `produced nothing when run: ${probe.cmd}`,
+              fix: 'see `guardian log`; the segment is silently missing from every tick',
+            },
+      );
+      if (!cfg.statusline.chained_from) {
+        checks.push({
+          name: 'chain source',
+          status: 'warn',
+          detail: 'chained_command is a snapshot and chained_from is unset, so later edits to that command never reach Guardian',
+          fix: 'run `guardian init` to re-read it live',
+        });
+      }
+    }
+  }
 
   checks.push(
     cfg.enabled
@@ -183,14 +219,73 @@ export function audit(
   }
 
   const sealedAgo = (now - m.sealed_at) / 60;
+  const ago = sealedAgo < 1 ? 'just now' : `${Math.round(sealedAgo)}m ago`;
+  // A manifest is a photograph, and the audit below reads it as if it were the state of
+  // play. Count what has been recorded since, or doctor reports a finished plan as the
+  // thing to do next -- confidently, which is the failure mode that costs the most.
+  // Minutes of work recorded AFTER the seal, in any session: a resumed project seals under
+  // one session id and goes on working under another, so asking only the sealed session's
+  // ledger reports a fresh manifest for a session that has moved on for hours.
+  const since = Math.max(0, (newestActivity(projectDir) - m.sealed_at) / 60);
   checks.push({
     name: 'handoff',
-    status: 'pass',
-    detail: `sealed ${sealedAgo < 1 ? 'just now' : `${Math.round(sealedAgo)}m ago`} — ${m.seal_reason}`,
+    status: since > 0 ? 'warn' : 'pass',
+    detail:
+      since > 0
+        ? `sealed ${ago} — ${m.seal_reason}; work recorded ${Math.round(since)}m later, so everything below is that stale`
+        : `sealed ${ago} — ${m.seal_reason}`,
+    ...(since > 0 ? { fix: 'run `guardian handoff` to seal the current state' } : {}),
   });
 
   checks.push(...auditManifest(projectDir, m));
   return checks;
+}
+
+/** When work was last recorded in this project, in ANY session. Only the tail of each
+ *  ledger is read: the newest event is the last line, and doctor should not parse megabytes
+ *  to answer "has anything happened since?". */
+function newestActivity(projectDir: string): number {
+  let newest = 0;
+  try {
+    const dir = join(stateDir(projectDir), 'sessions');
+    for (const f of readdirSync(dir)) {
+      if (!f.endsWith('.ledger.jsonl')) continue;
+      const lines = readTail(join(dir, f), 64 * 1024).split(String.fromCharCode(10));
+      for (let i = lines.length - 1; i >= 0; i--) {
+        const l = lines[i]!.trim();
+        if (!l.startsWith('{')) continue;
+        try {
+          const t = (JSON.parse(l) as { t?: number }).t;
+          if (typeof t === 'number' && Number.isFinite(t)) newest = Math.max(newest, t);
+        } catch {
+          continue; // a half-written tail line: keep looking backwards
+        }
+        break;
+      }
+    }
+  } catch {
+    /* no sessions directory yet */
+  }
+  return newest;
+}
+
+/** How often Guardian has had to drop the chained status line lately. The probe runs the
+ *  command once, with a synthetic payload, from doctor's cwd — which is not enough: the
+ *  failures seen in practice were payload- and environment-specific, and the log is the
+ *  only record of what actually happened on a tick. */
+function recentChainFailures(projectDir: string, now: number): number {
+  try {
+    const lines = readFileSync(logPath(projectDir), 'utf8').split('\n').slice(-400);
+    let n = 0;
+    for (const l of lines) {
+      if (!l.includes('chained status line produced nothing')) continue;
+      const t = Date.parse(l.slice(0, 24));
+      if (Number.isFinite(t) && (now - t / 1000) / 3600 < 6) n++;
+    }
+    return n;
+  } catch {
+    return 0;
+  }
 }
 
 /** The completeness checks. Each one corresponds to something a resuming session would

@@ -38,6 +38,10 @@ export interface HookInput {
   // Tool events
   tool_name?: string;
   tool_input?: Record<string, unknown>;
+  /** PostToolUse carries the tool's result here. `tool_output` is accepted too, but it is
+   *  not what Claude Code sends: reading only that field meant every command Guardian ever
+   *  recorded on a real machine had `ok: null`. */
+  tool_response?: unknown;
   tool_output?: string;
   tool_use_id?: string;
   // Session / compaction events
@@ -95,6 +99,19 @@ function git(cwd: string, args: string[]): string | null {
 
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'NotebookEdit', 'MultiEdit']);
 
+/** A tool's output, whichever field carried it. An object is stringified rather than
+ *  dropped: the pass/fail words a test run leaves behind are in there either way. */
+function toolOutput(inp: HookInput): string {
+  const r = inp.tool_response ?? inp.tool_output;
+  if (typeof r === 'string') return r;
+  if (r === undefined || r === null) return '';
+  try {
+    return JSON.stringify(r);
+  } catch {
+    return '';
+  }
+}
+
 function editedPath(input: Record<string, unknown> | undefined): string | null {
   if (!input) return null;
   for (const key of ['file_path', 'notebook_path', 'path']) {
@@ -123,7 +140,14 @@ function onPostToolUse(inp: HookInput, projectDir: string, sid: string, now: num
       : '';
 
   if (cmd) {
-    appendEvent(projectDir, sid, commandEvent(cmd, inp.tool_output ?? '', now));
+    const output = toolOutput(inp);
+    if (!output) {
+      // Without output there is no verdict, and a manifest that says "result unclear" for
+      // every command is how this went unnoticed for a whole release. Name the keys that
+      // did arrive, so the next payload change is caught by evidence, not inference.
+      log(projectDir, 'warn', `PostToolUse carried no tool output; keys: ${Object.keys(inp).join(',')}`);
+    }
+    appendEvent(projectDir, sid, commandEvent(cmd, output, now));
 
     // A commit is worth recording as a durable landmark, but the command text is not the
     // commit: `git commit -m x` may have failed, been amended, or been a --dry-run. Ask
@@ -340,7 +364,14 @@ function onStop(projectDir: string, sid: string, now: number): HookResult {
   const state = readState(projectDir, sid);
   if (state.latches.stop_forced) return NOTHING;
   if (severity(state.mode) < severity('LAND')) return NOTHING;
-  if (state.manifest.sealed_at !== null) return NOTHING;
+
+  // A sealed manifest is no longer the test. Auto-seal sets one on the way into LAND, and
+  // it cannot carry intent — intent is written after it, by the model, in response to this
+  // very refusal. So refuse while the one thing Guardian cannot observe is still missing,
+  // and only for a manifest belonging to this session: a previous session's next action
+  // says nothing about this one.
+  const sealed = readLatest(projectDir);
+  if (sealed && sealed.session.id === sid && sealed.claude_supplied.next_action) return NOTHING;
 
   writeState(projectDir, { ...state, latches: { ...state.latches, stop_forced: true } });
   // Exit 2 prevents the stop and shows stderr to Claude.

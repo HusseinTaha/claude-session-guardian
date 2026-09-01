@@ -57,6 +57,17 @@ display reads.
 because it took 2.8s is the correct fallback and an unacceptable one to perform quietly.
 Where a path swallows a failure, it leaves a mark on the bar and a line in `guardian log`.
 
+**A field name is a claim, and 154 nulls are the evidence.** Guardian read `tool_output`
+where PostToolUse sends `tool_response`, so every command it ever recorded on a real machine
+had `ok: null` while the tests — which synthesized the field — passed. Where a hook payload
+field is optional, a path that finds nothing logs the keys that did arrive.
+
+**Adding an actuator can disarm another one.** Auto-seal writes `manifest.sealed_at`, and the
+Stop brake used to skip whenever that was set: the new actuator silently turned off the only
+prompt that asks for a next action. A latch or gate keyed on another actuator's side effect
+is keyed on the wrong thing — gate on the fact you actually need (here, an unrecorded
+intent).
+
 **Burn defaults are calibrated, not chosen.** `scripts/calibrate.ts` replays real transcripts
 from `~/.claude/projects`. Changing `burn.*` means re-running it, not reasoning about it.
 

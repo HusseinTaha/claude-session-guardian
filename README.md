@@ -67,7 +67,7 @@ sits on a blocking path:
 | `PreCompact` | seals a handoff before context goes lossy |
 | `PostCompact` | hands the digest straight back via `additionalContext` |
 | `UserPromptSubmit` | offers a previous session's handoff once; injects the mode brief |
-| `Stop` | refuses one turn-end at LAND+ with nothing sealed — single-shot |
+| `Stop` | refuses one turn-end at LAND+ while no next action is recorded — single-shot |
 | `StopFailure` | reads the 429 tombstone, seals, switches to HARD_STOPPED |
 | `SessionEnd` | last-chance seal (no git checkpoint — 1.5s shared budget) |
 

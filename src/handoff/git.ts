@@ -148,6 +148,20 @@ export function listCheckpoints(projectDir: string): string[] {
   return r.ok && r.out ? r.out.split('\n').filter(Boolean) : [];
 }
 
+/** Keep the recent history and drop the rest. Every checkpoint ref pins a whole tree, and
+ *  a reachable ref is one `git gc` will never reclaim — so an unbounded set of them is a
+ *  repository that grows for as long as Guardian is installed. Auto-sealing made that rate
+ *  a seal per climb rather than a seal per session. Refs are named by ISO stamp, so the
+ *  newest are the last in sort order. */
+export function pruneCheckpoints(projectDir: string, keep: number): number {
+  const refs = listCheckpoints(projectDir).sort();
+  let n = 0;
+  for (const ref of refs.slice(0, Math.max(0, refs.length - keep))) {
+    if (git(projectDir, ['update-ref', '-d', ref]).ok) n++;
+  }
+  return n;
+}
+
 /** Guardian must leave nothing behind on uninstall. */
 export function removeCheckpoints(projectDir: string): number {
   const refs = listCheckpoints(projectDir);

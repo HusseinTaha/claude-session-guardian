@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, mkdirSync, rmSync, readFileSync, readdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -400,4 +400,40 @@ test("an agent's own notes travel in the handoff", () => {
   const digest = renderDigest(m, dir);
   assert.match(digest, /What the agents wrote down/);
   assert.match(digest, /Next: check subagents\.ts/);
+});
+
+// ------------------------------------------------------------------ retention
+
+test('sealing keeps the recent history and lets go of the rest', () => {
+  const dir = tmp();
+  for (let i = 0; i < 24; i++) seal(dir, 'sess-A', stateWith(), `seal ${i}`, T + i * 60, { git: false });
+  const kept = readdirSync(join(dir, '.claude', 'guardian', 'handoff', 'history')).sort();
+  assert.equal(kept.length, 20, 'an unbounded set of tree-pinning snapshots is a growing repo');
+  // The newest survive: the oldest four stamps are the ones gone.
+  assert.ok(kept[kept.length - 1]!.includes(new Date((T + 23 * 60) * 1000).toISOString().slice(0, 10)));
+  assert.equal(readLatest(dir)?.seal_reason, 'seal 23');
+});
+
+// ------------------------------------------------------------------ the unstated next action
+
+test('a digest with no stated next action says what was in flight, and says it is not intent', () => {
+  const dir = tmp();
+  appendEvent(dir, 'sess-A', { k: 'task', t: T - 30, id: 't1', title: 'Wire the reuse branch', status: 'created' });
+  appendEvent(dir, 'sess-A', { k: 'agent', t: T - 20, id: 'ag1', type: 'Explore', status: 'start' });
+  const m = buildManifest(dir, 'sess-A', stateWith(), 'auto-seal (LAND)', T, { git: false });
+  const digest = renderDigest(m, dir);
+
+  assert.match(digest, /## Next action — NOT STATED/);
+  assert.match(digest, /task still open: Wire the reuse branch/);
+  assert.match(digest, /agent Explore \(ag1\) was still running/);
+  assert.doesNotMatch(digest, /^## Next action$/m, 'an observation must never be printed as a stated one');
+});
+
+test('a stated next action still wins outright', () => {
+  const dir = tmp();
+  appendEvent(dir, 'sess-A', { k: 'note', t: T - 5, field: 'next_action', text: 'Finish rotateRefreshToken()' });
+  appendEvent(dir, 'sess-A', { k: 'task', t: T - 30, id: 't1', title: 'something open', status: 'created' });
+  const digest = renderDigest(buildManifest(dir, 'sess-A', stateWith(), 'manual', T, { git: false }), dir);
+  assert.match(digest, /## Next action\nFinish rotateRefreshToken\(\)/);
+  assert.doesNotMatch(digest, /NOT STATED/);
 });

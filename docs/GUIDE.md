@@ -1142,6 +1142,22 @@ It is at `LAND` or above with no handoff sealed, and it asks once. Record a next
 run `/guardian handoff`, or disable it with
 `/guardian config set landing.force_seal_turn false`.
 
+**`doctor` says `chained bar` or `chain source`.**
+`chained bar` means the status line Guardian displaced either failed when doctor ran it or
+has been dropped on real ticks recently — the segment is silently missing from the bar, and
+`guardian log` says why. `chain source` means `chained_from` is unset, so Guardian is running
+a snapshot of that command and will never see a later change to it; `guardian init` re-reads
+it live.
+
+**`doctor` says the handoff is stale.**
+Work has been recorded since it was sealed — in any session in this project — so the files,
+commits and next action below that line are that old. Seal again with `/guardian handoff`.
+
+**How many handoffs are kept?**
+The last 20, along with their checkpoint refs; older ones are pruned as each new one seals.
+A checkpoint pins a whole tree and `git gc` cannot reclaim a reachable ref, so keeping every
+one of them would grow the repository for as long as Guardian stayed installed.
+
 **Guardian sealed a handoff I did not ask for.**
 That is `landing.auto_seal_from`, which fires at `LAND` and above so a session cannot be lost
 waiting for a turn to end. The seal is additive — nothing is undone or paused by it, and the

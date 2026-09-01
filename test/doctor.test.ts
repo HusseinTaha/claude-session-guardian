@@ -311,3 +311,34 @@ test('doctor --strict exits nonzero when the work is not resumable', () => {
   });
   assert.equal(r.status, 1);
 });
+
+// ------------------------------------------------------------------ staleness and the chain
+
+test('a manifest with work recorded after it is reported as stale, not as the state of play', () => {
+  const dir = tmp();
+  writeState(dir, state());
+  seal(dir, 'sess-A', state(), 'SessionEnd (logout)', T - 3600, { git: false });
+
+  const fresh = byName(audit(dir, state(), T - 3600, join(dir, 'nope.json')), 'handoff')!;
+  assert.equal(fresh.status, 'pass');
+
+  // Work under a different session id, which is what a resumed project actually does.
+  appendEvent(dir, 'sess-B', fileEvent(join(dir, 'anything.txt'), 'Write', T));
+  const stale = byName(audit(dir, state(), T, join(dir, 'nope.json')), 'handoff')!;
+  assert.equal(stale.status, 'warn', 'doctor reported a finished plan as the next action before this');
+  assert.match(stale.detail, /stale/);
+  assert.ok(stale.fix, 'a warning nobody can act on is noise');
+});
+
+test('a chained status line that cannot run is a warning, not a silent gap', () => {
+  const dir = tmp();
+  writeState(dir, state());
+  writeFileSync(
+    configPath(dir),
+    JSON.stringify({ statusline: { chained_command: 'node "./definitely-not-here.cjs"' } }),
+  );
+  const checks = audit(dir, state(), T, join(dir, 'nope.json'));
+  assert.equal(statusOf(checks, 'chained bar'), 'warn');
+  // chained_from unset means Guardian is running a snapshot of that command forever.
+  assert.equal(statusOf(checks, 'chain source'), 'warn');
+});

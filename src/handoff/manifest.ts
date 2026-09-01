@@ -1,8 +1,21 @@
-import { readFileSync, writeFileSync, renameSync, existsSync, readdirSync, statSync } from 'node:fs';
+import {
+  readFileSync,
+  writeFileSync,
+  renameSync,
+  unlinkSync,
+  existsSync,
+  readdirSync,
+  statSync,
+} from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import type { GuardianState } from '../types.ts';
 import { readLedger, hashFile, testCommand, type LedgerEvent } from './ledger.ts';
-import { checkpoint, headMatches, type CheckpointResult } from './git.ts';
+import {
+  checkpoint,
+  headMatches,
+  pruneCheckpoints,
+  type CheckpointResult,
+} from './git.ts';
 import { handoffDir, ensureGuardianDir, stateDir } from '../core/paths.ts';
 import { fmtMin } from '../budget/mode.ts';
 
@@ -253,6 +266,28 @@ function testStep(command: string | null): string {
   return `Run \`${command}\` before writing anything, to confirm the starting state.`;
 }
 
+/** The best available answer to "what was happening?" when nobody said what should happen
+ *  next. Ordered by how specific each signal is. */
+function observedContinuation(m: Manifest): string[] {
+  const out: string[] = [];
+  for (const t of m.tasks.in_progress.slice(0, 3)) out.push(`task still open: ${t}`);
+  for (const b of m.observed.in_flight_at_seal.slice(0, 2)) {
+    out.push(`began and never seen to return: \`${b.command}\``);
+  }
+  for (const a of m.agents.filter((x) => x.status === 'IN_FLIGHT_AT_SEAL').slice(0, 3)) {
+    out.push(`agent ${a.type} (${a.id}) was still running — redo cost ${a.redo_cost_estimate}`);
+  }
+  const f = m.observed.files_touched;
+  if (!out.length && f.length) {
+    const newest = [...f].sort((a, b) => b.last_edit - a.last_edit)[0]!;
+    out.push(`last file edited: ${newest.path}`);
+  }
+  if (m.observed.tests && m.observed.tests.ok === false) {
+    out.push(`the recorded test run failed: \`${m.observed.tests.command}\``);
+  }
+  return out;
+}
+
 export function latestPath(projectDir: string): string {
   return join(handoffDir(projectDir), 'latest.json');
 }
@@ -284,7 +319,34 @@ export function seal(
     join(handoffDir(projectDir), 'history', `${stamp}.json`),
     `${JSON.stringify(m)}\n`,
   );
+  prune(projectDir);
   return m;
+}
+
+/** How many sealed handoffs to keep. Enough that anything anyone would resume from is
+ *  still there, and bounded, which matters now that a seal happens on every climb into LAND
+ *  rather than once a session. */
+const KEEP = 20;
+
+/** Housekeeping, and never allowed to break a seal. Each checkpoint ref pins a whole tree,
+ *  and a reachable ref is one `git gc` can never reclaim, so an unbounded set of them is a
+ *  repository that grows for as long as Guardian stays installed. */
+function prune(projectDir: string): void {
+  try {
+    const dir = join(handoffDir(projectDir), 'history');
+    const stale = readdirSync(dir)
+      .filter((f) => f.endsWith('.json'))
+      .sort() // ISO stamps: oldest first
+      .slice(0, -KEEP);
+    for (const f of stale) unlinkSync(join(dir, f));
+  } catch {
+    /* ignore */
+  }
+  try {
+    pruneCheckpoints(projectDir, KEEP);
+  } catch {
+    /* ignore */
+  }
 }
 
 export function readLatest(projectDir: string): Manifest | null {
@@ -329,6 +391,19 @@ export function renderDigest(m: Manifest, projectDir: string): string {
     L.push('## Next action');
     L.push(m.claude_supplied.next_action);
     L.push('');
+  } else {
+    // An automatic seal happens before the model has said anything: intent is written in
+    // response to the landing brief, and the seal is what preceded it. Guardian still knows
+    // what was in flight, so the slot carries that instead of nothing -- labelled, because
+    // an observation is not a stated intention and must never be read as one.
+    const observed = observedContinuation(m);
+    if (observed.length) {
+      L.push('## Next action — NOT STATED');
+      L.push('Nobody recorded one. What Guardian observed in flight, which is not the same');
+      L.push('thing and may not be what should happen next:');
+      for (const o of observed) L.push(`- ${o}`);
+      L.push('');
+    }
   }
 
   if (m.tasks.completed.length) {
