@@ -5,7 +5,7 @@ allowed-tools: Bash(node:*)
 disable-model-invocation: true
 ---
 
-!`node "${CLAUDE_PLUGIN_ROOT}/dist/guardian.cjs" config ${ARGUMENTS}`
+!`node "${CLAUDE_PLUGIN_ROOT}/dist/guardian.cjs" config $ARGUMENTS`
 
 With no arguments this lists every setting, its value, whether it is overridden, and what it
 does. Common changes:

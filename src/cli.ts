@@ -3,7 +3,7 @@ import { sense } from './sensors/statusline.ts';
 import { senseAgents } from './sensors/subagents.ts';
 import { install, init, uninstall, findGuardianSettings, guardianCommand } from './ui/install.ts';
 import { loadConfig } from './core/config.ts';
-import { readState } from './core/state.ts';
+import { readState, writeState } from './core/state.ts';
 import { renderDashboard } from './format/render.ts';
 import { statePath, userSettingsPath, resolveStateRoot, stateDir } from './core/paths.ts';
 import { handle } from './actuators/dispatch.ts';
@@ -379,7 +379,11 @@ function cmdDoctor(projectDir: string, argv: string[], out: (s: string) => void)
 }
 
 function main(argv: string[]): number {
-  const cmd = argv[0] ?? 'help';
+  // No arguments means "how am I doing", not "explain yourself" — `--help` is there for
+  // that. It also lets a slash command pass `$ARGUMENTS` straight through: the shell
+  // default form `${ARGUMENTS:-status}` looks like it handles the empty case and does not,
+  // because whoever expands it first sees an unset variable and silently wins.
+  const cmd = argv[0] ?? 'status';
   const out = (s: string) => process.stdout.write(s);
 
   // `hook` resolves its own root from the payload's cwd; everything else works from here.
@@ -422,9 +426,14 @@ function main(argv: string[]): number {
         return 0;
       }
       const reason = flag(argv, '--reason') ?? 'manual';
-      const m = seal(projectDir, sid, readState(projectDir, sid), reason, now(), {
+      const state = readState(projectDir, sid);
+      const m = seal(projectDir, sid, state, reason, now(), {
         git: !argv.includes('--no-git'),
       });
+      // The hook path records the seal in state; sealing by hand has to as well, or the
+      // dashboard goes on saying "Manifest: not sealed" with a sealed manifest on disk —
+      // a gauge contradicting the thing it is gauging.
+      writeState(projectDir, { ...state, manifest: { sealed_at: m.sealed_at } });
       const cp = m.observed.checkpoint;
       out(`Sealed handoff (${reason}).\n`);
       out(`  files tracked: ${m.observed.files_touched.length}\n`);

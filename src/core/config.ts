@@ -26,7 +26,13 @@ export const DEFAULT_CONFIG: GuardianConfig = {
     '*dotnet ef database*',
   ],
   landing: { inject_from: 'PREPARE', force_seal_turn: true, halt_loop_at_emergency: false },
-  statusline: { manage: true, chain_existing: true, chained_command: null, chained_from: null },
+  statusline: {
+    manage: true,
+    chain_existing: true,
+    chained_command: null,
+    chained_from: null,
+    chain_timeout_ms: 5000,
+  },
   // Calibrated against 43 real transcripts by scripts/calibrate.ts: window_min 15 with a
   // 60-sample budget scored the lowest prediction error (median 0.41 against the burn that
   // actually followed, versus 0.46 at a 10-minute window) at both the idle and the busy

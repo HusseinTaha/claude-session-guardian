@@ -6,7 +6,7 @@ allowed-tools: Bash(node:*)
 
 Run the Guardian CLI with the arguments in `$ARGUMENTS` (default `status`):
 
-!`node "${CLAUDE_PLUGIN_ROOT}/dist/guardian.cjs" ${ARGUMENTS:-status}`
+!`node "${CLAUDE_PLUGIN_ROOT}/dist/guardian.cjs" $ARGUMENTS`
 
 Report the result to the user. If the output says Guardian has no state for this project
 yet, the status line sensor has not run here. The usual cause is a project that sets its own

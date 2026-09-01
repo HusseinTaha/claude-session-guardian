@@ -5,7 +5,7 @@ allowed-tools: Bash(node:*)
 disable-model-invocation: true
 ---
 
-!`node "${CLAUDE_PLUGIN_ROOT}/dist/guardian.cjs" doctor ${ARGUMENTS}`
+!`node "${CLAUDE_PLUGIN_ROOT}/dist/guardian.cjs" doctor $ARGUMENTS`
 
 Summarise the verdict and act on the `FAIL` lines — each one carries the command that fixes
 it. A missing next action is the one worth fixing immediately: run

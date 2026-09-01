@@ -87,6 +87,36 @@ test('an unknown subcommand prints usage and is the only nonzero exit', () => {
   assert.equal(run(['version']).status, 0);
 });
 
+test('sealing by hand leaves the dashboard agreeing that it is sealed', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'guardian-cli-'));
+  const p = JSON.stringify({
+    session_id: 'seal-1',
+    cwd: dir,
+    workspace: { project_dir: dir },
+    context_window: { context_window_size: 200000, used_percentage: 30 },
+  });
+  run(['sense'], p, dir);
+  run(['handoff', '--reason', 'by hand', '--no-git'], '', dir);
+  // The hook path recorded the seal in state and the CLI did not, so a hand-sealed session
+  // showed "Manifest: not sealed" with the manifest sitting on disk beside it.
+  assert.doesNotMatch(run(['status'], '', dir).stdout, /Manifest:\s+not sealed/);
+});
+
+test('no arguments means the dashboard, so a slash command can pass $ARGUMENTS through', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'guardian-cli-'));
+  const p = JSON.stringify({
+    session_id: 'bare-1',
+    cwd: dir,
+    workspace: { project_dir: dir },
+    context_window: { context_window_size: 200000, used_percentage: 30 },
+  });
+  run(['sense'], p, dir);
+  // `${ARGUMENTS:-status}` in a slash command is expanded by whoever sees it first, and
+  // that is never Claude Code, so the default never carried the user's argument. The
+  // command passes $ARGUMENTS bare now, which means empty has to mean something useful.
+  assert.match(run([], '', dir).stdout, /CLAUDE SESSION GUARDIAN/);
+});
+
 test('the configured command uses forward slashes, which Windows requires', () => {
   const r = run(['where']);
   assert.equal(r.status, 0);

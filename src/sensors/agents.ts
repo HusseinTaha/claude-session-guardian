@@ -8,6 +8,9 @@ export interface AgentSnapshot {
   name: string | null;
   type: string | null;
   status: string | null;
+  /** What this agent was actually asked to do. The default row leads with it, and dropping
+   *  it for a gauge trades the only field that says which agent this is. */
+  description: string | null;
   /** Epoch seconds. */
   started_at: number | null;
   token_count: number | null;
@@ -128,6 +131,7 @@ export function updateAgents(prev: AgentsFile, rows: TaskRow[], now: number): Ag
       name: row.name ?? old?.name ?? null,
       type: row.type ?? old?.type ?? null,
       status: row.status ?? null,
+      description: row.description ?? row.label ?? old?.description ?? null,
       started_at: toEpochSeconds(row.startTime) ?? old?.started_at ?? null,
       token_count: tokens ?? old?.token_count ?? null,
       context_window:

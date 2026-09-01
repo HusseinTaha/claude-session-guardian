@@ -458,3 +458,30 @@ test('the agents state file is not mistaken for a session of its own', () => {
   assert.match(r.stdout, /Explore/, `agents output was: ${r.stdout}`);
   assert.doesNotMatch(r.stdout, /No live subagents/);
 });
+
+test('a row says what the agent is doing, and the meters survive a narrow terminal', () => {
+  const a = {
+    id: 'a1',
+    name: 'Explore',
+    type: 'Explore',
+    status: 'running',
+    description: 'map every call site of recordSample across src and test',
+    started_at: T - 180,
+    token_count: 42_000,
+    context_window: 200_000,
+    samples: [],
+    tokens_per_min: null,
+    last_seen: T,
+  };
+  const wide = renderAgentRow(a, {}, T, 120);
+  assert.match(wide, /Explore · map every call site/);
+  assert.match(wide, /ctx 21%/);
+
+  // Narrow: the description is what gives, because the meter and the clock are what a
+  // decision near a wall is made on. Trimming the whole line would cut those instead.
+  const narrow = renderAgentRow(a, {}, T, 60);
+  assert.ok(narrow.length <= 60, `row was ${narrow.length} chars: ${narrow}`);
+  assert.match(narrow, /ctx 21%/);
+  assert.match(narrow, /3m elapsed/);
+  assert.match(narrow, /…/);
+});

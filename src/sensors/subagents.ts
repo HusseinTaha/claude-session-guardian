@@ -55,8 +55,25 @@ export function renderAgentRow(
   const wall = contextWallMin(a);
   if (wall !== null && wall <= 5) parts.push(`⚠ ctx full ~${fmtMin(wall)}`);
 
-  const line = parts.join(' · ');
-  return columns > 10 && line.length > columns ? `${line.slice(0, columns - 1)}…` : line;
+  // What it is doing, second — two agents of the same type are otherwise indistinguishable,
+  // and "which one do I let finish" is a question about the work, not the meter.
+  //
+  // The description is also the only part that can be arbitrarily long, so it absorbs the
+  // truncation alone. Trimming the whole line instead would cut from the right, taking the
+  // context warning and the elapsed clock — the fields a decision near a wall is made on —
+  // to keep the beginning of a sentence.
+  const meters = parts.slice(1);
+  const head = parts[0]!;
+  if (!a.description) return clip(parts.join(' · '), columns);
+
+  const fixed = [head, ...meters].join(' · ').length + ' · '.length;
+  const room = columns > 10 ? columns - fixed : a.description.length;
+  const desc = room >= 12 ? clip(a.description, room) : null;
+  return clip([head, ...(desc ? [desc] : []), ...meters].join(' · '), columns);
+}
+
+function clip(s: string, columns: number): string {
+  return columns > 10 && s.length > columns ? `${s.slice(0, columns - 1)}…` : s;
 }
 
 /** Entry point for the `subagentStatusLine` command. Emits one JSON line per row it

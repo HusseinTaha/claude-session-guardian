@@ -824,6 +824,7 @@ are equivalent.
 | `landing.force_seal_turn` | Whether the `Stop` hook refuses one turn-end to force a seal. |
 | `landing.halt_loop_at_emergency` | Hard brake on the agentic loop at `EMERGENCY`. Off by default. |
 | `statusline.chained_from` | Settings file the chained command is re-read from each tick, so a tool that manages its own status line keeps control of it. `init` sets it. |
+| `statusline.chain_timeout_ms` | How long the chained status line may take before Guardian gives up on it. Default 5000. A bar that builds a large index can need it. |
 | `render.color` | Set `false` for a terminal that mangles ANSI. |
 | `enabled` | `false` makes Guardian completely silent while leaving it installed. |
 
@@ -1030,6 +1031,16 @@ it when that file points somewhere else. The usual cause is a project with its o
 `guardian init` takes it over and keeps the displaced command running first. If your
 organisation sets `allowManagedHooksOnly` or `disableAllHooks`, custom status lines are
 suppressed entirely and Guardian cannot run at all.
+
+**The status line I had disappeared in one big repository but works in others.**
+It is taking longer than `statusline.chain_timeout_ms` to build. A bar that walks a large
+index can need seconds — one measured here took 2.8s in a 62k-node repository. Guardian
+shows `⋯` where the missing segment should be and records the reason in `guardian log`.
+Raise the limit:
+
+```bash
+guardian config set statusline.chain_timeout_ms 10000
+```
 
 **The status line I had stopped appearing after installing Guardian.**
 Guardian re-runs it and appends its own segment, so it should still be there. If it is not:

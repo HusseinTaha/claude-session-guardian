@@ -143,8 +143,14 @@ export function expandVars(cmd: string, env: Record<string, string | undefined>)
 }
 
 /** Run the status line command Guardian displaced, so installing Guardian never costs the
- *  user the status line they already had. */
-function runChained(cmd: string, stdin: string, projectDir: string): string {
+ *  user the status line they already had.
+ *
+ *  The timeout is generous and configurable because the alternative is worse than a slow
+ *  bar: a 1.5s limit silently deleted a status line that took 2.8s to build in a large
+ *  repository, and the only visible effect was two tools disappearing from the line with
+ *  no error anywhere. Whatever that command costs, it cost the same before Guardian was
+ *  in front of it. */
+function runChained(cmd: string, stdin: string, projectDir: string, cfg: GuardianConfig): string {
   try {
     // Claude Code sets this for the command it launches; the chained one is launched by
     // Guardian instead, so it has to be supplied here or the child sees nothing.
@@ -153,11 +159,23 @@ function runChained(cmd: string, stdin: string, projectDir: string): string {
       input: stdin,
       shell: true,
       encoding: 'utf8',
-      timeout: 1500,
+      timeout: Math.max(100, cfg.statusline.chain_timeout_ms),
       windowsHide: true,
       env,
     });
-    return (r.stdout ?? '').trim();
+    const text = (r.stdout ?? '').trim();
+    if (text) return text;
+    // Killed by the timeout, or died. Say so somewhere: a bar that quietly loses a segment
+    // is indistinguishable from a bar whose other tool decided it had nothing to report.
+    if (r.signal || r.error || r.status !== 0) {
+      log(
+        projectDir,
+        'warn',
+        `chained status line produced nothing (${r.signal ? `killed after ${cfg.statusline.chain_timeout_ms}ms` : (r.error?.message ?? `exit ${r.status}`)}): ${cmd}`,
+      );
+      return r.signal ? '⋯' : '';
+    }
+    return '';
   } catch {
     return '';
   }
@@ -203,7 +221,7 @@ export function sense(raw: string, now = Date.now() / 1000): string {
   const projectDir = resolveProjectDir(payload);
   const cfg = loadConfig(projectDir);
   const toChain = liveChainedCommand(cfg, projectDir);
-  const chained = toChain ? runChained(toChain, raw, projectDir) : '';
+  const chained = toChain ? runChained(toChain, raw, projectDir, cfg) : '';
 
   if (!cfg.enabled) return chained;
 

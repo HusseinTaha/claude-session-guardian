@@ -17,7 +17,7 @@ for a choice whose reasoning is not visible in the code.
 
 Then seal:
 
-!`node "${CLAUDE_PLUGIN_ROOT}/dist/guardian.cjs" handoff ${ARGUMENTS}`
+!`node "${CLAUDE_PLUGIN_ROOT}/dist/guardian.cjs" handoff $ARGUMENTS`
 
 Tell the user what was captured and where. If the output says no next action was recorded,
 add one before finishing.

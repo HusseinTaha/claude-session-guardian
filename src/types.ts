@@ -117,6 +117,10 @@ export interface GuardianConfig {
     /** Settings file the chained command was taken from. Re-read each tick when set, so a
      *  tool that manages its own status line keeps control of it. */
     chained_from: string | null;
+    /** How long the chained command may take before Guardian gives up on it. Generous by
+     *  default: it is the user's own status line, and it cost what it cost before Guardian
+     *  was in front of it. */
+    chain_timeout_ms: number;
   };
   burn: {
     window_min: number;
