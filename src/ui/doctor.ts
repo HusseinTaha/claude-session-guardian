@@ -1,4 +1,12 @@
-import { readFileSync, existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import {
+  readFileSync,
+  existsSync,
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  mkdirSync,
+  realpathSync,
+} from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, dirname, relative } from 'node:path';
@@ -352,13 +360,28 @@ export interface ColdResult {
   worktree?: string;
 }
 
+/** Proof the prompt survived the trip. Without it a cold session that received nothing
+ *  still answers something, and an answer is all the keyword checks need to see. */
+const COLD_MARKER = 'HANDOFF-READ';
+
 const COLD_PROMPT = [
+  `Begin your reply with the token ${COLD_MARKER}.`,
   'Read .claude/guardian/handoff/latest.md and nothing else. Do not explore the codebase.',
   'Answer in at most 120 words:',
   '1. What is the single next action?',
   '2. Which file paths would you touch first?',
   '3. What can you NOT determine from the handoff alone?',
 ].join(' ');
+
+/** Windows hands out 8.3 short paths for the temp directory; a cold session refuses to
+ *  read through one. Resolve to the long form where the path exists. */
+function realNative(p: string): string {
+  try {
+    return realpathSync.native(p);
+  } catch {
+    return p;
+  }
+}
 
 /** Test the parachute.
  *
@@ -378,7 +401,10 @@ export function coldResume(
     return { ok: false, detail: 'the manifest has no live checkpoint ref to build a worktree from' };
   }
 
-  const wt = mkdtempSync(join(tmpdir(), 'guardian-cold-'));
+  // Long form, not the 8.3 short path Windows hands out for the temp directory: a cold
+  // session refuses to read through `HUSSEI~1.AZU` as a suspicious path pattern, and
+  // non-interactively there is nobody to approve it.
+  const wt = realNative(mkdtempSync(join(tmpdir(), 'guardian-cold-')));
   const dir = join(wt, 'tree');
   try {
     const add = spawnSync('git', ['worktree', 'add', '--detach', dir, ref], {
@@ -398,8 +424,14 @@ export function coldResume(
     mkdirSync(dirname(digestDest), { recursive: true });
     writeFileSync(digestDest, readFileSync(latestDigestPath(projectDir), 'utf8'));
 
-    const run = spawnSync('claude', ['-p', COLD_PROMPT], {
+    // The prompt goes on stdin, never in argv. `claude` is a .cmd shim on Windows, so this
+    // needs a shell — and a shell concatenates arguments without escaping them, which split
+    // the prompt on its spaces and delivered `-p` the single word "Read". The cold session
+    // then answered the question "Read", and every check downstream scored that answer as
+    // though the handoff had been read. Single-token flags are safe to pass as argv.
+    const run = spawnSync('claude', ['-p', '--allowedTools', 'Read'], {
       cwd: dir,
+      input: COLD_PROMPT,
       encoding: 'utf8',
       timeout: opts.timeoutMs ?? 240_000,
       windowsHide: true,
@@ -414,6 +446,16 @@ export function coldResume(
     }
 
     const answer = (run.stdout ?? '').trim();
+    if (!answer.includes(COLD_MARKER)) {
+      return {
+        ok: false,
+        detail:
+          'the prompt never reached the cold session — it replied without the marker, so its ' +
+          'answer says nothing about the handoff',
+        answer,
+        worktree: dir,
+      };
+    }
     return {
       ok: true,
       detail: 'a cold session read the handoff and answered',

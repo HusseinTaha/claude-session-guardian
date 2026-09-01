@@ -177,10 +177,17 @@ export function buildManifest(
       open_decisions: notes(events, 'decision'),
       gotchas: notes(events, 'gotcha'),
     },
+    // Only steps this manifest can actually back. A fixed list promises sections that a
+    // digest may not carry — "verify the file hashes below" with no hashes below, "do not
+    // redo anything under completed" with no completed section — and a cold reader is left
+    // deciding whether the file is truncated or the tool is lying. Both readings cost it
+    // the trust the handoff runs on.
     resume_protocol: [
-      'Verify the file hashes below still match. A mismatch means the file changed outside this handoff.',
+      files.size
+        ? 'Verify the file hashes below still match. A mismatch means the file changed outside this handoff.'
+        : 'No files were recorded for this session; treat the working tree as unverified.',
       testStep(tests?.command ?? null),
-      'Do NOT redo anything listed under "completed".',
+      ...(tasksDone.size ? ['Do NOT redo anything listed under "completed".'] : []),
       'Resume from "next action". If it is absent, re-derive it from in-progress work before editing.',
     ],
   };

@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { audit, auditManifest, renderChecks, verdict, coldResume, logTail } from '../src/ui/doctor.ts';
 import { emptyState, writeState } from '../src/core/state.ts';
-import { seal, readLatest, type Manifest } from '../src/handoff/manifest.ts';
+import { seal, readLatest, buildManifest, type Manifest } from '../src/handoff/manifest.ts';
 import { appendEvent, fileEvent } from '../src/handoff/ledger.ts';
 import { configPath } from '../src/core/paths.ts';
 import { install } from '../src/ui/install.ts';
@@ -207,6 +207,20 @@ test('an account without rate limits warns and explains why', () => {
   const c = byName(audit(dir, noLimits, T, join(dir, 'nope.json')), 'rate limits')!;
   assert.equal(c.status, 'warn');
   assert.match(c.fix!, /expected outside Claude.ai Pro and Max/);
+});
+
+test('the resume protocol only promises sections the manifest carries', () => {
+  const dir = tmp();
+  // Nothing observed: no hashes to verify, no completed list to avoid redoing. A cold
+  // reader told to "verify the file hashes below" with no hashes below cannot tell whether
+  // the digest is truncated or the tool is lying, and either reading costs it the trust the
+  // handoff runs on. Found by `doctor --cold` reading a real manifest.
+  const bare = buildManifest(dir, 's1', emptyState('s1'), 'test', T, { git: false });
+  const steps = bare.resume_protocol.join(' ');
+  assert.doesNotMatch(steps, /hashes below/);
+  assert.doesNotMatch(steps, /"completed"/);
+  assert.match(steps, /No files were recorded/);
+  assert.match(steps, /Resume from "next action"/);
 });
 
 test('the report renders every check and every fix', () => {

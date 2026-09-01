@@ -352,12 +352,18 @@ function cmdDoctor(projectDir: string, argv: string[], out: (s: string) => void)
         : 'the cold session did not clearly restate the recorded next action'
     }\n`,
   );
+  // Only a real check when there is something to name. Marking a cold session down for
+  // naming none of zero recorded files punishes it for being right, and buries the actual
+  // problem — that nothing was recorded — under a warning about the reader.
+  const hasFiles = m.observed.files_touched.length > 0;
   out(
-    `  [${r.namedAFile ? 'ok  ' : 'warn'}] files          ${
-      r.namedAFile
-        ? 'it named at least one file the manifest records'
-        : 'it named none of the files the manifest records'
-    }\n`,
+    hasFiles
+      ? `  [${r.namedAFile ? 'ok  ' : 'warn'}] files          ${
+          r.namedAFile
+            ? 'it named at least one file the manifest records'
+            : 'it named none of the files the manifest records'
+        }\n`
+      : '  [--  ] files          the manifest records none, so there was nothing to name\n',
   );
   if (keep && r.worktree) out(`\n  worktree kept at ${r.worktree}\n`);
 
@@ -368,7 +374,7 @@ function cmdDoctor(projectDir: string, argv: string[], out: (s: string) => void)
   out('model with no memory of this work could not say what to do next, neither could you\n');
   out('tomorrow, and the manifest needs a better `note --next`.\n');
 
-  const failed = !r.echoedNextAction || !r.namedAFile || !v.resumable;
+  const failed = !r.echoedNextAction || (hasFiles && !r.namedAFile) || !v.resumable;
   return strict && failed ? 1 : 0;
 }
 
