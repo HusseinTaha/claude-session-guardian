@@ -144,7 +144,7 @@ and re-run by the sensor on every tick, with Guardian's segment on the line belo
 
 ```
 ◤ graft · 318 nodes / 1161 edges  🐝 hive · c3804 · 0f/0d       ← the bar you had
-🛡 LAND ctx ▓▓▓▓▓░░░░░ 53% ⚠ ~21m  5h ▓▓▓▓▓▓▓▓▓░ 89% ⚠ ~3m     ← Guardian
+🛡 LAND ctx ▓▓▓▓▓░░░░░ 53% ⚠ ~21m  5h ▓▓▓▓▓▓▓▓▓░ 89% ⚠ ~3m  7d ▓▓▓▓░░░░░░ 41%  ← Guardian
 ```
 
 The command it re-runs is re-read from its source file every tick rather than snapshotted,
@@ -161,7 +161,7 @@ claude plugin uninstall claude-session-guardian
 ## Usage
 
 ```
-🛡 PREPARE ctx ▓▓▓▓▓░░░░░ 45% ⚠ ~28m  5h ▓▓▓▓▓▓▓▓░░ 83% ⚠ ~12m  $5.00
+🛡 PREPARE ctx ▓▓▓▓▓░░░░░ 45% ⚠ ~28m  5h ▓▓▓▓▓▓▓▓░░ 83% ⚠ ~12m  7d ▓▓▓▓░░░░░░ 41%  $5.00
 ```
 
 Each gauge carries its own colour — green calm, amber at `WATCH`, bold amber at `PREPARE`,

@@ -84,6 +84,10 @@ reconstruction still reads far below the wall. None is an estimator blind spot.
 - **Each gauge carries its own colour** — green, amber, bold amber, red, inverted red —
   keyed on that axis's mode rather than its percentage, so a 94% window that refills faster
   than you burn it stays green.
+- **The weekly window gets the same gauge as the 5-hour one** — `7d ▓▓▓▓░░░░░░ 41%`, with a
+  bar, its own mode colour and a `⚠ ~Nm` clock when there is a real one. It used to appear as
+  a bare percentage, and only once it crossed the watch floor: a wall you cannot see until it
+  is already a concern is one you plan a week's work into.
 - **Guardian's segment takes the line below the bar it chained** (`statusline.own_line`).
   Two full status lines on one row wrap in most terminals.
 - **Agent rows say what the agent is doing.** Replacing the default row had dropped its

@@ -85,12 +85,11 @@ export function renderStatus(state: GuardianState, cfg: GuardianConfig): string 
   if (ctx) segs.push(ctx);
   const fh = axisSegment('5h', state.axes.five_hour, cfg, paint);
   if (fh) segs.push(fh);
-
-  // The weekly window only earns bar space once it is actually a concern.
-  const wk = state.axes.seven_day;
-  if (wk?.used_pct != null && wk.used_pct >= cfg.thresholds_percent_floor.watch) {
-    segs.push(`7d ${paint(`${wk.used_pct.toFixed(0)}%`, AXIS_COLOR[wk.mode])}`);
-  }
+  // The weekly window is a wall like any other, and the one that ends a week rather than
+  // an afternoon — it gets the same gauge as the 5h, not a bare percentage that only
+  // appears once it is already a problem.
+  const wk = axisSegment('7d', state.axes.seven_day, cfg, paint);
+  if (wk) segs.push(wk);
 
   if (state.cost_usd != null) segs.push(`$${state.cost_usd.toFixed(2)}`);
 

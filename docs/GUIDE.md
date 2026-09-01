@@ -64,7 +64,7 @@ command on every tick and appends its own segment. Nothing you had is lost.
 
 ```
 ◤ graft · 318 nodes / 1161 edges  🐝 hive · c3804 · 0f/0d       ← the bar you had
-🛡 LAND ctx ▓▓▓▓▓░░░░░ 53% ⚠ ~21m  5h ▓▓▓▓▓▓▓▓▓░ 89% ⚠ ~3m     ← Guardian
+🛡 LAND ctx ▓▓▓▓▓░░░░░ 53% ⚠ ~21m  5h ▓▓▓▓▓▓▓▓▓░ 89% ⚠ ~3m  7d ▓▓▓▓░░░░░░ 41%  ← Guardian
 ```
 
 Guardian takes the line below by default, because two full bars on one row wrap in most
@@ -144,41 +144,45 @@ rm -rf .claude/guardian              # and the state, if you want it gone
 
 Guardian adds one segment. It is quiet when there is nothing to say.
 
+`ctx` is the context window, `5h` the 5-hour rate limit, `7d` the weekly one. All three are
+drawn the same way — bar, percentage, and a `⚠ ~Nm` clock when there is a real deadline —
+because a weekly wall you cannot see is one you walk into on a Thursday.
+
 **Normal — nothing to think about.** The shield is dim and there are no clocks.
 
 ```
-🛡 ctx ▓▓░░░░░░░░ 21%  5h ▓▓▓░░░░░░░ 34%  $1.20
+🛡 ctx ▓▓░░░░░░░░ 21%  5h ▓▓▓░░░░░░░ 34%  7d ▓▓▓▓░░░░░░ 41%  $1.20
 ```
 
 **WATCH — a wall is on the horizon.** Amber. The `⚠ ~26m` is the part that matters: at the
 current burn rate you have about 26 minutes of 5-hour budget left.
 
 ```
-🛡 WATCH ctx ▓▓░░░░░░░░ 17% ⚠ ~42m  5h ▓▓▓▓▓▓░░░░ 62% ⚠ ~26m  $1.08
+🛡 WATCH ctx ▓▓░░░░░░░░ 17% ⚠ ~42m  5h ▓▓▓▓▓▓░░░░ 62% ⚠ ~26m  7d ▓▓▓▓░░░░░░ 41%  $1.08
 ```
 
 **PREPARE — stop starting things you cannot finish.** Bold amber, under 12 minutes.
 
 ```
-🛡 PREPARE ctx ▓▓▓▓▓░░░░░ 45% ⚠ ~28m  5h ▓▓▓▓▓▓▓▓░░ 83% ⚠ ~12m  $5.00
+🛡 PREPARE ctx ▓▓▓▓▓░░░░░ 45% ⚠ ~28m  5h ▓▓▓▓▓▓▓▓░░ 83% ⚠ ~12m  7d ▓▓▓▓▓░░░░░ 47%  $5.00
 ```
 
 **LAND — finish what is open and seal it.** Red, under 5 minutes.
 
 ```
-🛡 LAND ctx ▓▓▓▓▓▓░░░░ 61% ⚠ ~20m  5h ▓▓▓▓▓▓▓▓▓░ 95% ⚠ ~4m  $7.24
+🛡 LAND ctx ▓▓▓▓▓▓░░░░ 61% ⚠ ~20m  5h ▓▓▓▓▓▓▓▓▓░ 95% ⚠ ~4m  7d ▓▓▓▓▓░░░░░ 52%  $7.24
 ```
 
 **EMERGENCY — the next request may 429.** Inverted red, under 90 seconds.
 
 ```
-🛡 EMERGENCY ctx ▓▓▓▓▓▓▓░░░ 70% ⚠ ~15m  5h ▓▓▓▓▓▓▓▓▓▓ 98% ⚠ ~2m
+🛡 EMERGENCY ctx ▓▓▓▓▓▓▓░░░ 70% ⚠ ~15m  5h ▓▓▓▓▓▓▓▓▓▓ 98% ⚠ ~2m  7d ▓▓▓▓▓░░░░░ 52%
 ```
 
 ### The one case worth internalising
 
 ```
-🛡 ctx ▓▓░░░░░░░░ 20%  5h ▓▓▓▓▓▓▓▓▓░ 94%
+🛡 ctx ▓▓░░░░░░░░ 20%  5h ▓▓▓▓▓▓▓▓▓░ 94%  7d ▓▓▓▓░░░░░░ 43%
 ```
 
 **94% and no warning at all.** That is not a bug. The 5-hour window refills faster than

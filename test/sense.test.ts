@@ -145,6 +145,9 @@ test('the status bar stays short and shows the clock only when there is one', ()
   assert.ok(line.length < 90, `too wide: ${line.length} chars`);
   assert.match(line, /ctx .* 62%/);
   assert.match(line, /5h .* 91%/);
+  // The weekly window gets the same gauge as the 5h, at any level — 41% is well under the
+  // watch floor and still shows, because a wall you cannot see is one you walk into.
+  assert.match(line, /7d ▓.* 41%/);
   assert.doesNotMatch(line, /⚠/); // no burn rate yet, so no fabricated countdown
 });
 
