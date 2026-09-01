@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { AXES, type AxisName, type AxisState, type GuardianConfig, type GuardianState, type Sample, type StatusLinePayload } from '../types.ts';
 import { loadConfig } from '../core/config.ts';
 import { resolveStateRoot } from '../core/paths.ts';
@@ -162,6 +163,33 @@ function runChained(cmd: string, stdin: string, projectDir: string): string {
   }
 }
 
+/** The command to chain, preferring what its source file says *now* over what it said when
+ *  Guardian displaced it.
+ *
+ *  A status line is not always a constant. hive and graft both rewrite theirs — new flags,
+ *  a changed path, another tool chained in behind them — and a snapshot taken at `init`
+ *  would pin whatever it happened to say that day. The other tool would go on editing a
+ *  file that no longer decides anything, its updates landing nowhere, with the stale
+ *  command still running and nothing anywhere to explain why.
+ *
+ *  The snapshot remains the fallback: the file can be deleted, emptied, or taken over by
+ *  Guardian itself, and in none of those cases should the user lose their bar. */
+export function liveChainedCommand(cfg: GuardianConfig, projectDir: string): string | null {
+  const snapshot = cfg.statusline.chained_command;
+  const from = cfg.statusline.chained_from;
+  if (!from) return snapshot;
+  try {
+    const cmd = (
+      JSON.parse(readFileSync(from, 'utf8')) as { statusLine?: { command?: string } }
+    ).statusLine?.command;
+    // Guardian's own command would recurse; anything else is the current truth.
+    if (typeof cmd === 'string' && cmd && !cmd.includes('guardian.cjs')) return cmd;
+  } catch {
+    /* unreadable or gone: the snapshot is all there is */
+  }
+  return snapshot;
+}
+
 /** Entry point for the statusLine command. Must never throw and must stay well under the
  *  latency budget: it runs on every session event. */
 export function sense(raw: string, now = Date.now() / 1000): string {
@@ -174,9 +202,8 @@ export function sense(raw: string, now = Date.now() / 1000): string {
 
   const projectDir = resolveProjectDir(payload);
   const cfg = loadConfig(projectDir);
-  const chained = cfg.statusline.chained_command
-    ? runChained(cfg.statusline.chained_command, raw, projectDir)
-    : '';
+  const toChain = liveChainedCommand(cfg, projectDir);
+  const chained = toChain ? runChained(toChain, raw, projectDir) : '';
 
   if (!cfg.enabled) return chained;
 

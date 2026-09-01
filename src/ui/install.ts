@@ -181,6 +181,10 @@ export function init(startDir: string, userSettings = userSettingsPath()): InitR
       // Only overwrite when something was actually displaced: re-running init must not
       // erase a chained command recorded by an earlier run.
       chained_command: chained ?? cfg.statusline.chained_command,
+      // Remember where it came from, not just what it said. Tools that manage their own
+      // status line rewrite it — hive does — and a snapshot taken at init would keep
+      // running last month's command while the tool's updates went nowhere.
+      chained_from: chained ? settingsFile : cfg.statusline.chained_from,
     },
   });
 

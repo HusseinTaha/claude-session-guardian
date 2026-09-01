@@ -7,7 +7,7 @@ and lands the session before it hits.
 > ledger, handoff manifest, lossless compaction, verified resume, git checkpoints; per-agent
 > sensing, the spawn gate, self-checkpointing subagents; tiered injection, the Stop brake,
 > 429 recovery; a validated config CLI, the `doctor` self-check with a cold-resume harness,
-> and an optional three-tool MCP server. 196 tests.
+> and an optional three-tool MCP server. 198 tests.
 >
 > **[Full user guide with examples →](docs/GUIDE.md)**
 
@@ -105,10 +105,11 @@ carries the hooks that act on it, plus the `/guardian` commands.
 
 ```bash
 npm install && npm run build
-npm install -g .                                    # puts `guardian` on PATH
-guardian install                             # wires the status line
+npm install -g .                    # puts `guardian` on PATH
+guardian install                    # wires the status line
 
-claude plugin marketplace add .                     # hooks, skill and /guardian commands
+npm run stage-plugin                # build/plugin: exactly the payload, nothing else
+claude plugin marketplace add .     # hooks, skill and /guardian commands
 claude plugin install claude-session-guardian@claude-session-guardian
 ```
 
@@ -367,7 +368,7 @@ it holds prompts and paths and does not belong in a commit.
 ## Development
 
 ```bash
-npm run check      # typecheck + layer check + build + 196 tests
+npm run check      # typecheck + layer check + build + 198 tests
 npm run layers     # assert imports only point downward
 ```
 

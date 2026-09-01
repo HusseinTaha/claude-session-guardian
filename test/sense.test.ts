@@ -1,6 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeState, sampleFrom, resolveProjectDir, expandVars } from '../src/sensors/statusline.ts';
+import {
+  computeState,
+  sampleFrom,
+  resolveProjectDir,
+  expandVars,
+  liveChainedCommand,
+} from '../src/sensors/statusline.ts';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { emptyState } from '../src/core/state.ts';
 import { DEFAULT_CONFIG } from '../src/core/config.ts';
 import { renderStatus } from '../src/format/render.ts';
@@ -155,6 +164,33 @@ test('a chained command keeps the variables Claude Code would have expanded', ()
   // A bare $name that is not a variable is left alone rather than deleted: it is far more
   // likely to be part of a path or an argument than an unset variable.
   assert.equal(expandVars('bar $notavar', env), 'bar $notavar');
+});
+
+test('the chained command follows its source file rather than a snapshot of it', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'guardian-chain-'));
+  const file = join(dir, 'settings.json');
+  const cfgWith = (cmd: string | null, from: string | null) => ({
+    ...cfg,
+    statusline: { ...cfg.statusline, chained_command: cmd, chained_from: from },
+  });
+
+  // hive and graft rewrite their own status line. Pinning what it said at init time would
+  // run last month's command while the other tool's edits landed nowhere.
+  writeFileSync(file, JSON.stringify({ statusLine: { command: 'new-bar --with extras' } }));
+  assert.equal(liveChainedCommand(cfgWith('old-bar', file), dir), 'new-bar --with extras');
+
+  // The snapshot is the fallback, not the source of truth — but losing the file must not
+  // cost the user their bar.
+  writeFileSync(file, 'not json at all');
+  assert.equal(liveChainedCommand(cfgWith('old-bar', file), dir), 'old-bar');
+  assert.equal(liveChainedCommand(cfgWith('old-bar', join(dir, 'gone.json')), dir), 'old-bar');
+
+  // And if that file ends up pointing at Guardian, chaining it would recurse.
+  writeFileSync(file, JSON.stringify({ statusLine: { command: 'node "x/guardian.cjs" sense' } }));
+  assert.equal(liveChainedCommand(cfgWith('old-bar', file), dir), 'old-bar');
+
+  // No source recorded: pre-`init` configs keep working exactly as they did.
+  assert.equal(liveChainedCommand(cfgWith('old-bar', null), dir), 'old-bar');
 });
 
 test('each gauge is coloured by its own mode, not by its percentage', () => {

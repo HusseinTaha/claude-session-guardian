@@ -567,6 +567,15 @@ function main(argv: string[]): number {
       );
       out(`  checkpoint refs deleted: ${refs}\n`);
       out(`  state left in place at ${stateDir(projectDir)} (delete it to remove all traces)\n`);
+      // `install` and `init` can each have wired a different layer. Sweeping them all here
+      // would be worse than saying so: only one displaced command is recorded per project,
+      // so a second layer would be cleared with nothing left to put back in its place.
+      const remaining = findGuardianSettings(projectDir);
+      if (remaining) {
+        out(`\nStill wired at ${remaining}.\n`);
+        out(`  guardian uninstall --settings "${remaining}"\n`);
+        out('  That layer has no recorded status line to restore, so it will be removed.\n');
+      }
       return 0;
     }
 

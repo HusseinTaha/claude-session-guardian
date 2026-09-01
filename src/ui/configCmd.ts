@@ -269,6 +269,7 @@ export const HELP: Record<string, string> = {
   'agents.deny_spawn_from': 'mode at which new subagents are refused; HARD_STOPPED disables the gate',
   'agents.inject_checkpoint_prompt_from': 'mode at which spawned agents are told to checkpoint',
   safe_boundary_commands: 'irreversible commands to record as possibly-interrupted; never blocked',
+  'statusline.chained_from': 'settings file the chained command is re-read from each tick',
   'burn.window_min': 'trailing window for the burn-rate estimate',
   'burn.min_span_s': 'minimum sample span before a rate is computed',
   'burn.alpha': 'smoothing; higher reacts faster and is twitchier',

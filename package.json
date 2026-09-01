@@ -1,6 +1,6 @@
 {
   "name": "claude-session-guardian",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Sees every Claude Code exhaustion wall coming with time-to-impact, and lands the session before it hits.",
   "license": "MIT",
   "type": "module",
@@ -10,6 +10,7 @@
   },
   "files": [
     ".claude-plugin/",
+    "CHANGELOG.md",
     "README.md",
     "commands/",
     "dist/",
@@ -25,9 +26,10 @@
     "build": "esbuild src/cli.ts --bundle --platform=node --target=node18 --format=cjs --outfile=dist/guardian.cjs --legal-comments=none --banner:js=\"#!/usr/bin/env node\"",
     "typecheck": "tsc --noEmit",
     "test": "node --test \"test/**/*.test.ts\"",
-    "check": "npm run typecheck && npm run layers && npm run build && npm test",
+    "check": "npm run typecheck && npm run layers && npm run build && npm run stage-plugin && npm test",
     "perf": "node --test test/cli.test.ts",
-    "layers": "node scripts/check-layers.mjs"
+    "layers": "node scripts/check-layers.mjs",
+    "stage-plugin": "node scripts/stage-plugin.mjs"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",

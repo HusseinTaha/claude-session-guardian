@@ -39,8 +39,9 @@ npm install
 npm run build
 
 npm install -g .            # puts `guardian` on PATH, everywhere
-guardian install     # wires the status line into ~/.claude/settings.json
+guardian install            # wires the status line into ~/.claude/settings.json
 
+npm run stage-plugin        # stages build/plugin: exactly the plugin payload, nothing else
 claude plugin marketplace add .
 claude plugin install claude-session-guardian@claude-session-guardian
 ```
@@ -773,7 +774,12 @@ are equivalent.
     "halt_loop_at_emergency": false
   },
 
-  "statusline": { "manage": true, "chain_existing": true, "chained_command": null },
+  "statusline": {
+    "manage": true,
+    "chain_existing": true,
+    "chained_command": null,
+    "chained_from": null
+  },
   "render": { "bar_width": 10, "color": true }
 }
 ```
@@ -795,6 +801,7 @@ are equivalent.
 | `landing.inject_from` | Mode at which Guardian starts injecting a brief. `LAND` for a quieter tool. |
 | `landing.force_seal_turn` | Whether the `Stop` hook refuses one turn-end to force a seal. |
 | `landing.halt_loop_at_emergency` | Hard brake on the agentic loop at `EMERGENCY`. Off by default. |
+| `statusline.chained_from` | Settings file the chained command is re-read from each tick, so a tool that manages its own status line keeps control of it. `init` sets it. |
 | `render.color` | Set `false` for a terminal that mangles ANSI. |
 | `enabled` | `false` makes Guardian completely silent while leaving it installed. |
 
@@ -831,7 +838,8 @@ echo '{ "enabled": false }' > .claude/guardian/config.json
 | `/guardian handoff [--reason R] [--no-git]` | Seal a manifest now |
 | `/guardian resume` | Print the sealed handoff plus workspace verification; mark consumed |
 | `/guardian verify` | Check the manifest against the workspace without consuming it |
-| `/guardian install` / `uninstall` | Set up or remove the status line |
+| `/guardian init` | Set up the project you are in, taking over whichever settings layer decides its status line |
+| `/guardian install` / `uninstall` | Set up or remove the status line at the user level |
 | `guardian note --objective\|--next\|--decision\|--gotcha <text>` | Record intent |
 | `/guardian wait` | Countdown to a rate-limit window reopening |
 | `/guardian config [get\|set\|unset\|reset\|check\|path]` | Read and change settings, validated |
@@ -993,10 +1001,21 @@ that went wrong and was swallowed rather than allowed to break the session.
 ## Troubleshooting
 
 **No Guardian segment in the status line.**
-Restart Claude Code — the command is read at startup. Then check
-`node dist/guardian.cjs where` matches the `statusLine.command` in
-`~/.claude/settings.json`. If your organisation sets `allowManagedHooksOnly` or
-`disableAllHooks`, custom status lines are suppressed entirely and Guardian cannot run.
+Restart Claude Code — the command is read at startup. Then run `guardian doctor`: its first
+line reports the settings file that actually decides this project's status line, and names
+it when that file points somewhere else. The usual cause is a project with its own
+`statusLine` in `.claude/settings.json`, which replaces the user-level one outright —
+`guardian init` takes it over and keeps the displaced command running first. If your
+organisation sets `allowManagedHooksOnly` or `disableAllHooks`, custom status lines are
+suppressed entirely and Guardian cannot run at all.
+
+**The status line I had stopped appearing after installing Guardian.**
+Guardian re-runs it and appends its own segment, so it should still be there. If it is not:
+the chained command is re-read each tick from the file named by `statusline.chained_from`,
+falling back to the snapshot in `statusline.chained_command`. Check both with
+`guardian config get statusline.chained_command`. A command that writes to stderr rather
+than stdout, or takes longer than 1.5s, produces nothing — Guardian fails open rather than
+holding up the bar.
 
 **`guardian: awaiting first API response`.**
 Normal at the very start. `context_window` is null until the first response comes back.
@@ -1010,9 +1029,10 @@ Nothing has moved enough to measure. An idle session, or fewer than 45 seconds o
 The percentage floors are still guarding.
 
 **Guardian has no state for this project yet.**
-The sensor has not run in this directory. Check you are in the project root — Guardian
-walks up for `.claude/guardian` or `.git` to find one root, and never treats your home
-directory as a project.
+The sensor has not run in this directory. Either it has never sensed here — `guardian init`,
+then restart — or you are below the root Guardian resolved: it walks up for
+`.claude/guardian` or `.git` to settle on one, and never treats your home directory as a
+project.
 
 **A subagent spawn was refused and I wanted it.**
 Guardian is at `LAND` or above. Raise `agents.deny_spawn_from` in
@@ -1115,10 +1135,22 @@ Adding a feature means asking which layer it belongs to. If the answer is "it ne
 import upward", the dependency is inverted and the check will say so.
 
 ```bash
-npm run check      # typecheck + layers + build + tests
-npm run layers     # just the architecture check
-npm test           # 196 tests
+npm run check         # typecheck + layers + build + stage-plugin + tests
+npm run layers        # just the architecture check
+npm run perf          # hot-path latency: sense() runs on every session event
+npm test              # 198 tests
+npm run stage-plugin  # build/plugin — the plugin payload, listed explicitly
 ```
+
+`scripts/` holds the three things that are not the product: `check-layers.mjs` enforces the
+table above, `stage-plugin.mjs` builds the marketplace payload, and `calibrate.ts` replays
+every transcript in `~/.claude/projects` to tune and defend the burn estimator.
+
+**The plugin payload is staged, not the working directory.** A marketplace source pointed at
+a checkout installs the whole checkout — and Claude Code reads what it finds there. A
+`.mcp.json` kept for local development becomes an MCP server the plugin declares, enabled in
+every project of everyone who installs it. `stage-plugin.mjs` copies an explicit list into
+`build/plugin/`; anything new the manifest references has to be added to that list.
 
 `GUARDIAN_NOW=<epoch>` replays a session at its original timestamps, which is how the mode
 ladder is demonstrated and how `doctor --cold` reproduces a handoff.

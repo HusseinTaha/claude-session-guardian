@@ -110,7 +110,14 @@ export interface GuardianConfig {
      *  unexpected halt is worse than the problem for most users. */
     halt_loop_at_emergency: boolean;
   };
-  statusline: { manage: boolean; chain_existing: boolean; chained_command: string | null };
+  statusline: {
+    manage: boolean;
+    chain_existing: boolean;
+    chained_command: string | null;
+    /** Settings file the chained command was taken from. Re-read each tick when set, so a
+     *  tool that manages its own status line keeps control of it. */
+    chained_from: string | null;
+  };
   burn: {
     window_min: number;
     min_span_s: number;
