@@ -1,0 +1,3 @@
+{
+  "$comment": "Shipped defaults for the plugin. The status line is configured by `guardian install` rather than here, so an existing user status line can be detected and chained instead of silently replaced."
+}

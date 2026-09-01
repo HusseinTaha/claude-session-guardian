@@ -1,0 +1,41 @@
+{
+  "name": "claude-session-guardian",
+  "version": "0.1.0",
+  "description": "Sees every Claude Code exhaustion wall coming with time-to-impact, and lands the session before it hits.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "claude-guardian": "dist/guardian.cjs"
+  },
+  "files": [
+    "dist/",
+    ".claude-plugin/",
+    "hooks/",
+    "commands/",
+    "skills/",
+    "settings.json",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "build": "esbuild src/cli.ts --bundle --platform=node --target=node18 --format=cjs --outfile=dist/guardian.cjs --legal-comments=none",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "check": "npm run typecheck && npm run build && npm test",
+    "perf": "node --test test/cli.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0"
+  },
+  "keywords": [
+    "claude-code",
+    "claude-code-plugin",
+    "rate-limit",
+    "context-window",
+    "handoff"
+  ]
+}

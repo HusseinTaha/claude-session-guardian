@@ -1,0 +1,11 @@
+{
+  "name": "claude-session-guardian",
+  "owner": { "name": "claude-session-guardian" },
+  "plugins": [
+    {
+      "name": "claude-session-guardian",
+      "source": "./",
+      "description": "Usage watchdog and handoff orchestrator for long Claude Code sessions."
+    }
+  ]
+}
