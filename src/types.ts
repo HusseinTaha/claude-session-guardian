@@ -121,6 +121,9 @@ export interface GuardianConfig {
      *  default: it is the user's own status line, and it cost what it cost before Guardian
      *  was in front of it. */
     chain_timeout_ms: number;
+    /** Put Guardian's segment on its own line below the status line it chained, rather than
+     *  appending to it. Two full bars on one row wrap in most terminals. */
+    own_line: boolean;
   };
   burn: {
     window_min: number;

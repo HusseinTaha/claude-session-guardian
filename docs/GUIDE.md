@@ -825,6 +825,7 @@ are equivalent.
 | `landing.halt_loop_at_emergency` | Hard brake on the agentic loop at `EMERGENCY`. Off by default. |
 | `statusline.chained_from` | Settings file the chained command is re-read from each tick, so a tool that manages its own status line keeps control of it. `init` sets it. |
 | `statusline.chain_timeout_ms` | How long the chained status line may take before Guardian gives up on it. Default 5000. A bar that builds a large index can need it. |
+| `statusline.own_line` | Guardian's segment sits on its own line below the status line it chained. Set `false` to append it to the same row instead. |
 | `render.color` | Set `false` for a terminal that mangles ANSI. |
 | `enabled` | `false` makes Guardian completely silent while leaving it installed. |
 

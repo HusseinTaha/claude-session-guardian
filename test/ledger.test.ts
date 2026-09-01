@@ -12,6 +12,7 @@ import {
   inferOk,
   hashFile,
   commandEvent,
+  testCommand,
 } from '../src/handoff/ledger.ts';
 import { resolveStateRoot, ledgerPath } from '../src/core/paths.ts';
 
@@ -144,4 +145,18 @@ test('redact handles a name that is itself the keyword, and a multi-word header 
   assert.equal(redact('token: abc def ghi'), 'token: [REDACTED]');
   assert.ok(!redact('curl -H "Authorization: Bearer tok_abc"').includes('tok_abc'));
   assert.ok(!redact('--password hunter2').includes('hunter2'));
+});
+
+test('the test baseline is the command, not the line it was buried in', () => {
+  // A real capture: the whole compound line was stored as the session's test command, and
+  // the resume protocol then told a fresh session to run it verbatim — including a global
+  // install and a `resume` that consumes a manifest.
+  assert.equal(
+    testCommand('npm run check 2>&1 | grep -E "ok"; npm install -g . >/dev/null 2>&1; guardian resume'),
+    'npm run check',
+  );
+  assert.equal(testCommand('npm test'), 'npm test');
+  assert.equal(testCommand('npm test -- --grep auth | tee out.log'), 'npm test -- --grep auth');
+  assert.equal(testCommand('cd x && pytest -q 2>&1 | tail -5'), 'pytest -q');
+  assert.equal(testCommand('echo hi'), null);
 });

@@ -77,6 +77,25 @@ export function classifyCommand(cmd: string): CommandKind {
   return 'other';
 }
 
+/** The runnable part of a line that happens to contain a test command.
+ *
+ *  People do not type `npm test`. They type it inside a compound line with a grep, a
+ *  reinstall and three echoes, and the whole string was being stored as the session's test
+ *  baseline — then handed to the next session as "run this to confirm the starting state".
+ *  One real capture told a fresh session to run `npm install -g .` and a `guardian resume`
+ *  that consumes a manifest. A baseline has to be the command, not the transcript of how it
+ *  was invoked that once. */
+export function testCommand(cmd: string): string | null {
+  for (const segment of cmd.split(/;|&&|\|\||\n/)) {
+    if (!TEST_RE.test(segment)) continue;
+    // Drop a display pipeline and any redirection: `npm test 2>&1 | grep -E ...` is one
+    // person's way of reading the output, not part of establishing the baseline.
+    const bare = segment.split('|')[0]!.replace(/\d?>&?\d?\s*\S*/g, '').trim();
+    if (bare) return bare;
+  }
+  return null;
+}
+
 /** Guardian sees a command's output but not its exit code (PostToolUse carries
  *  `tool_output`; failures arrive on the separate PostToolUseFailure event). So success is
  *  inferred, and `null` is returned whenever the output is genuinely ambiguous — an

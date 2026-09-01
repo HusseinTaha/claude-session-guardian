@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
 import { join, dirname, relative } from 'node:path';
 import type { GuardianState } from '../types.ts';
-import { readLedger, hashFile, type LedgerEvent } from './ledger.ts';
+import { readLedger, hashFile, testCommand, type LedgerEvent } from './ledger.ts';
 import { checkpoint, headMatches, type CheckpointResult } from './git.ts';
 import { handoffDir, ensureGuardianDir } from '../core/paths.ts';
 import { fmtMin } from '../budget/mode.ts';
@@ -95,7 +95,11 @@ export function buildManifest(
         break;
       case 'command':
         commands.push({ command: e.command, kind: e.kind, ok: e.ok, t: e.t });
-        if (e.kind === 'test') tests = { command: e.command, ok: e.ok, at: e.t };
+        // Store the runnable command, not the compound line it was buried in: the resume
+        // protocol tells the next session to run this one verbatim.
+        if (e.kind === 'test') {
+          tests = { command: testCommand(e.command) ?? e.command, ok: e.ok, at: e.t };
+        }
         // PostToolUse only fires once a command returns, so seeing it here clears the
         // matching boundary marker. Whatever is left began and never came back.
         boundaries.delete(e.command);

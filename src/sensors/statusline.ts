@@ -238,5 +238,8 @@ export function sense(raw: string, now = Date.now() / 1000): string {
     return chained;
   }
 
-  return chained ? `${chained}  ${line}` : line;
+  // Guardian's segment goes below what it chained by default. Two full status lines on one
+  // row wrap in most terminals, and a wrapped bar is worse than a second line.
+  if (!chained) return line;
+  return cfg.statusline.own_line ? `${chained}\n${line}` : `${chained}  ${line}`;
 }

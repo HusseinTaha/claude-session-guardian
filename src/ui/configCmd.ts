@@ -271,6 +271,7 @@ export const HELP: Record<string, string> = {
   safe_boundary_commands: 'irreversible commands to record as possibly-interrupted; never blocked',
   'statusline.chained_from': 'settings file the chained command is re-read from each tick',
   'statusline.chain_timeout_ms': 'how long the chained status line may take before it is dropped',
+  'statusline.own_line': "put Guardian's segment on its own line under the one it chained",
   'burn.window_min': 'trailing window for the burn-rate estimate',
   'burn.min_span_s': 'minimum sample span before a rate is computed',
   'burn.alpha': 'smoothing; higher reacts faster and is twitchier',

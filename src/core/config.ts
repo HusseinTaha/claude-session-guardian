@@ -32,6 +32,7 @@ export const DEFAULT_CONFIG: GuardianConfig = {
     chained_command: null,
     chained_from: null,
     chain_timeout_ms: 5000,
+    own_line: true,
   },
   // Calibrated against 43 real transcripts by scripts/calibrate.ts: window_min 15 with a
   // 60-sample budget scored the lowest prediction error (median 0.41 against the burn that
