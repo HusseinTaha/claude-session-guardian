@@ -173,3 +173,18 @@ test('a heredoc body is data, not the command it is passed to', () => {
   assert.equal(testCommand(commit), null);
   assert.equal(classifyCommand('npm run check 2>&1 | grep ok'), 'test');
 });
+
+// A quoted argument is data, exactly as a heredoc body is. `guardian note --next "...223
+// tests green (npm run check)..."` was recorded as this session's test baseline, and the
+// resume protocol tells the next session to run the baseline verbatim.
+test('a command quoted inside an argument is not the command being run', () => {
+  const noting =
+    'node dist/guardian.cjs note --next "finalized with 223 tests green (npm run check)"';
+  assert.equal(classifyCommand(noting), 'other');
+  assert.equal(testCommand(noting), null);
+
+  // The real thing still classifies, and still comes back verbatim.
+  assert.equal(classifyCommand('npm run check'), 'test');
+  assert.equal(testCommand('npm test -- "auth flow"'), 'npm test -- "auth flow"');
+  assert.equal(classifyCommand('git commit -m "npm run check was the baseline"'), 'git');
+});

@@ -45,8 +45,10 @@ command's argument (Claude Code substitutes `$ARGUMENTS`, not the `:-` form). Pr
 bare form and handle the default in code you control.
 
 **A command's payload is data, not commands.** Heredoc bodies carry commit messages and
-patch scripts. Pattern-matching the whole line made a commit message about a bad test
-baseline become the test baseline. Anything classifying a command reads only up to `<<`.
+patch scripts; quoted arguments carry notes and handoff text. Pattern-matching the whole line
+made a commit message about a bad test baseline become the test baseline — and then, in the
+same repo, a `guardian note --next "...npm run check..."` become one. Anything classifying a
+command reads only up to `<<`, with quoted spans blanked out.
 
 **A gauge must never contradict what it gauges.** The dashboard read `state.manifest` while
 the CLI's seal wrote only the manifest file, so it reported "not sealed" with a sealed

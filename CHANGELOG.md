@@ -129,6 +129,11 @@ reconstruction still reads far below the wall. None is an estimator blind spot.
   had to drop it, reports `chain source` when `chained_from` is unset (a snapshot Guardian
   will run forever), and marks a handoff **stale** when work has been recorded after it — in
   any session, since a resumed project seals under one id and works under another.
+- **A quoted argument is data too.** `guardian note --next "...223 tests green (npm run
+  check)..."` was classified as this session's test baseline, because the words were inside
+  the note — the heredoc rule with a different delivery, and found by doctor auditing the
+  seal that recorded it. Classification blanks quoted spans; extraction still returns the
+  original text.
 - `npm run perf` covers PostToolUse, which now runs on every tool call rather than on edits
   and shell commands only: p50 1.3ms.
 

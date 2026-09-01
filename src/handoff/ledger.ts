@@ -81,8 +81,19 @@ function commandHead(cmd: string): string {
   return i === -1 ? cmd : cmd.slice(0, i);
 }
 
+/** Blank out quoted spans, for classification only.
+ *
+ *  The heredoc rule with a different delivery: a quoted argument is data too. Guardian
+ *  recorded `guardian note --next "... 223 tests green (npm run check) ..."` as this
+ *  session's test baseline, because the words were in the note, and the resume protocol then
+ *  tells the next session to run that as its baseline. Extraction keeps the original text;
+ *  only the matching sees this. */
+function stripQuoted(s: string): string {
+  return s.replace(/'[^']*'/g, "''").replace(/"[^"]*"/g, '""');
+}
+
 export function classifyCommand(cmd: string): CommandKind {
-  const head = commandHead(cmd);
+  const head = stripQuoted(commandHead(cmd));
   if (TEST_RE.test(head)) return 'test';
   if (BUILD_RE.test(head)) return 'build';
   if (GIT_RE.test(head)) return 'git';
@@ -99,7 +110,7 @@ export function classifyCommand(cmd: string): CommandKind {
  *  was invoked that once. */
 export function testCommand(cmd: string): string | null {
   for (const segment of commandHead(cmd).split(/;|&&|\|\||\n/)) {
-    if (!TEST_RE.test(segment)) continue;
+    if (!TEST_RE.test(stripQuoted(segment))) continue;
     // Drop a display pipeline and any redirection: `npm test 2>&1 | grep -E ...` is one
     // person's way of reading the output, not part of establishing the baseline.
     const bare = segment.split('|')[0]!.replace(/\d?>&?\d?\s*\S*/g, '').trim();
@@ -108,8 +119,8 @@ export function testCommand(cmd: string): string | null {
   return null;
 }
 
-/** Guardian sees a command's output but not its exit code (PostToolUse carries
- *  `tool_output`; failures arrive on the separate PostToolUseFailure event). So success is
+/** Guardian sees a command's output but not its exit code (PostToolUse carries the result in
+ *  `tool_response`; failures arrive on the separate PostToolUseFailure event). So success is
  *  inferred, and `null` is returned whenever the output is genuinely ambiguous — an
  *  invented verdict in a handoff is worse than an absent one. */
 export function inferOk(output: string): boolean | null {
