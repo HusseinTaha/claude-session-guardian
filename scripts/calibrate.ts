@@ -10,8 +10,9 @@
  *
  *   context   exact. Context fill IS input + cache_creation + cache_read for a message,
  *             which is what context_window.used_percentage reports.
- *   five_hour a rolling 5h sum of weighted token cost, including subagents, since fan-out
- *             spends account budget. The real weighting is not public, so the capacity
+ *   five_hour a rolling 5h sum of weighted token cost across every transcript on the
+ *             machine, subagents included: the budget is per account, so a session cannot
+ *             see most of what is being spent against it. The real weighting is not public, so the capacity
  *             constant is solved for from the observed 429s and its spread is reported --
  *             a tight spread means the cost model tracks reality, a wide one means it does
  *             not and the five_hour levels should be read as shape only.
@@ -21,7 +22,9 @@
  * relative error is invariant under any linear rescaling of the percentage axis.
  *
  * Usage:  node --experimental-strip-types scripts/calibrate.ts [--projects DIR] [--quick]
- *         [--alphas A,..] [--windows M,..] [--samples N,..] [--tick S] [--json OUT]
+ *         [--alphas A,..] [--windows M,..] [--samples N,..] [--tick S] [--diagnose]
+ *         [--per-session]
+ *         [--json OUT]
  */
 import { readdirSync, statSync, createReadStream, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -30,7 +33,7 @@ import { createInterface } from 'node:readline';
 import { DEFAULT_CONFIG } from '../src/core/config.ts';
 import { rawBurnRate, smooth, recordSample, spacingS } from '../src/budget/burn.ts';
 import { timeToWall, axisMode, severity } from '../src/budget/mode.ts';
-import type { AxisState, GuardianConfig, Mode, Sample } from '../src/types.ts';
+import { MODES, type AxisState, type GuardianConfig, type Mode, type Sample } from '../src/types.ts';
 
 const args = process.argv.slice(2);
 const flag = (n: string, d: string | null = null): string | null => {
@@ -38,6 +41,11 @@ const flag = (n: string, d: string | null = null): string | null => {
   return i >= 0 && args[i + 1] ? args[i + 1]! : d;
 };
 const QUICK = args.includes('--quick');
+const DIAGNOSE = args.includes('--diagnose');
+// The 5-hour budget is per account, so every transcript on the machine is summed by
+// default. --per-session reverts to one transcript's own turns, which is what the first
+// version of this harness did and why its cost model had a 51% spread instead of 32%.
+const ACCOUNT = !args.includes('--per-session');
 const PROJECTS = flag('--projects', join(homedir(), '.claude', 'projects'))!;
 const JSON_OUT = flag('--json');
 const MIN_BYTES = 400_000;
@@ -69,6 +77,19 @@ interface Sess {
   ev: Ev[];
   walls: Wall[];
   subFiles: number;
+}
+
+/** Consecutive 429s minutes apart are one wall hit repeatedly, not several walls: the
+ *  first tombstone is the event, the rest are retries against a window that is already
+ *  closed. Counting them separately counts the same miss over and over. */
+const WALL_CLUSTER_S = 1800;
+function wallEvents(s: Sess): Wall[] {
+  const out: Wall[] = [];
+  for (const w of s.walls.filter((x) => x.kind === 'five_hour').sort((a, b) => a.t - b.t)) {
+    const prev = out[out.length - 1];
+    if (!prev || w.t - prev.t > WALL_CLUSTER_S) out.push(w);
+  }
+  return out;
 }
 
 const epoch = (s: string): number | null => {
@@ -191,6 +212,43 @@ const WEIGHTINGS: Weights[] = [
 ];
 const cost = (e: Ev, w: Weights): number => e.inp + e.cc + w.cr * e.cr + w.out * e.out;
 
+/** The account's whole rolling five-hour spend, not just this session's.
+ *
+ *  The 5-hour budget is per account: every session running against it in the same window
+ *  draws on the same pool, and a transcript can only see its own turns. Summing across
+ *  every transcript on the machine is the closest an offline reconstruction can get to
+ *  what the API was actually counting. Built once, queried by binary search. */
+class AccountSpend {
+  private readonly t: Float64Array;
+  private readonly cum: Float64Array;
+  constructor(ev: Ev[], w: Weights) {
+    const sorted = ev.slice().sort((a, b) => a.t - b.t);
+    this.t = new Float64Array(sorted.length);
+    this.cum = new Float64Array(sorted.length + 1);
+    for (let i = 0; i < sorted.length; i++) {
+      this.t[i] = sorted[i]!.t;
+      this.cum[i + 1] = this.cum[i]! + cost(sorted[i]!, w);
+    }
+  }
+  /** Index of the first event strictly after `x`. */
+  private upper(x: number): number {
+    let lo = 0;
+    let hi = this.t.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (this.t[mid]! <= x) lo = mid + 1;
+      else hi = mid;
+    }
+    return lo;
+  }
+  at(t: number): number {
+    return this.cum[this.upper(t)]! - this.cum[this.upper(t - FIVE_H)]!;
+  }
+  series(ticks: number[]): number[] {
+    return ticks.map((t) => this.at(t));
+  }
+}
+
 /** Rolling five-hour weighted spend, evaluated at each tick. */
 function fiveHourSeries(ev: Ev[], w: Weights, ticks: number[]): number[] {
   const c = ev.map((e) => cost(e, w));
@@ -236,6 +294,20 @@ const cfgWith = (alpha: number, windowMin: number, maxSamples: number): Guardian
   burn: { ...DEFAULT_CONFIG.burn, alpha, window_min: windowMin, max_samples: maxSamples },
 });
 
+/** Why a real 429 arrived with no LAND warning. Tuning cannot fix any of these; they are
+ *  properties of what was observable at the time, which is the point of naming them. */
+interface WallDiag {
+  session: string;
+  ageMin: number; // how long the session had been running when the wall hit
+  usedPct: number | null;
+  burn: number | null;
+  ttwMin: number | null;
+  mode: Mode;
+  peak: Mode; // worst mode reached in the hour before
+  leadMin: number | null; // null when never warned
+  reason: string; // '' when warned
+}
+
 interface Score {
   errs: number[]; // relative error, predicted burn vs the burn that followed
   flips: number; // ladder direction reversals -- the "crying wolf" failure
@@ -265,6 +337,8 @@ function replay(
   windowMin: number,
   maxSamples: number,
   sc: Score,
+  diag: WallDiag[] | null = null,
+  acct: AccountSpend | null = null,
 ): void {
   const cfg = cfgWith(alpha, windowMin, maxSamples);
   const t0 = s.ev[0]!.t;
@@ -273,7 +347,7 @@ function replay(
   for (let t = t0; t <= t1; t += TICK_S) ticks.push(t);
   if (ticks.length < 10) return;
 
-  const fh = fiveHourSeries(s.ev, w, ticks);
+  const fh = acct ? acct.series(ticks) : fiveHourSeries(s.ev, w, ticks);
   const ctx = contextSeries(s.ev, ticks);
 
   // Fixed 5h windows anchored on a real observed reset where one exists, so resets_at is
@@ -291,7 +365,12 @@ function replay(
   let prevSev: number | null = null;
   let lastSign = 0;
   let landStart: number | null = null;
-  const landEpisodes: number[] = [];
+  // Intervals, not start times. An episode that began two hours before the wall and was
+  // still running when it hit is a warning that never stopped, and the old scoring --
+  // which kept only the start and required it inside the last hour -- called that a miss.
+  const landIntervals: Array<[number, number]> = [];
+  const events = wallEvents(s);
+  const snap = new Map<number, { used: number | null; burn: number | null; ttw: number | null; sev: number; peak: number }>();
 
   for (let i = 0; i < ticks.length; i++) {
     const t = ticks[i]!;
@@ -326,6 +405,20 @@ function replay(
       mode: 'NORMAL',
     } as AxisState;
     const sev = severity(axisMode('five_hour', st, cfg));
+    if (diag) {
+      for (const wl of events) {
+        if (t <= wl.t && wl.t < t + TICK_S) {
+          snap.set(wl.t, { used: fhPct, burn: smFh, ttw: st.time_to_wall_min, sev, peak: sev });
+        }
+        // Worst the ladder reached in the hour before, so a miss can be told apart from a
+        // near miss that stalled at WATCH.
+        if (t <= wl.t && wl.t - t < 3600) {
+          const cur = snap.get(wl.t);
+          if (cur) cur.peak = Math.max(cur.peak, sev);
+          else snap.set(wl.t, { used: null, burn: null, ttw: null, sev: -1, peak: sev });
+        }
+      }
+    }
     if (prevSev !== null && sev !== prevSev) {
       const sign = Math.sign(sev - prevSev);
       if (lastSign !== 0 && sign !== lastSign) sc.flips++;
@@ -336,20 +429,51 @@ function replay(
     const landing = sev >= severity('LAND');
     if (landing && landStart === null) landStart = t;
     if (!landing && landStart !== null) {
-      landEpisodes.push(landStart);
+      landIntervals.push([landStart, t]);
       landStart = null;
     }
   }
-  if (landStart !== null) landEpisodes.push(landStart);
+  const lastTick = ticks[ticks.length - 1]!;
+  if (landStart !== null) landIntervals.push([landStart, lastTick]);
 
-  for (const wl of s.walls) {
-    if (wl.kind !== 'five_hour') continue;
-    const warned = landEpisodes.filter((x) => x <= wl.t && wl.t - x < 3600);
-    if (warned.length) sc.leads.push((wl.t - Math.min(...warned)) / 60);
-    else sc.missed++;
+  for (const wl of events) {
+    // Warned if an episode was still running when the wall hit, or ended within the hour
+    // before it. Either way the lead is measured from when the warning started.
+    const relevant = landIntervals.filter(
+      ([a, b]) => (a <= wl.t && wl.t <= b + TICK_S) || (b <= wl.t && wl.t - b < 3600),
+    );
+    const lead = relevant.length ? (wl.t - Math.min(...relevant.map(([a]) => a))) / 60 : null;
+    if (lead === null) sc.missed++;
+    else sc.leads.push(lead);
+
+    if (!diag) continue;
+    const sn = snap.get(wl.t);
+    const covered = wl.t <= lastTick + TICK_S;
+    diag.push({
+      session: `${s.project}/${s.id.slice(0, 8)}`,
+      ageMin: (wl.t - t0) / 60,
+      usedPct: sn?.used ?? null,
+      burn: sn?.burn ?? null,
+      ttwMin: sn?.ttw ?? null,
+      mode: sn && sn.sev >= 0 ? MODES[sn.sev]! : 'NORMAL',
+      peak: sn ? MODES[sn.peak]! : 'NORMAL',
+      leadMin: lead,
+      reason:
+        lead !== null
+          ? ''
+          : !covered
+            ? 'session transcript ends before the wall — nothing left to sense with'
+            : sn === undefined
+              ? 'no tick landed on the wall — session idle through it'
+              : sn.burn === null
+                ? 'burn unmeasurable — no movement to extrapolate from'
+                : sn.used !== null && sn.used < 90
+                  ? `reconstructed level only ${sn.used}% — the cost model, not the estimator`
+                  : `blind spot — sat at ${MODES[sn.peak]} with ${sn.burn.toFixed(2)} %/min`,
+    });
   }
-  for (const ep of landEpisodes) {
-    if (!s.walls.some((wl) => wl.t >= ep && wl.t - ep < 3600)) sc.falseLand++;
+  for (const [a] of landIntervals) {
+    if (!events.some((wl) => wl.t >= a && wl.t - a < 3600)) sc.falseLand++;
   }
 }
 
@@ -364,12 +488,14 @@ async function main(): Promise<void> {
   process.stderr.write(`reading transcripts from ${PROJECTS} ...\n`);
   const sessions = await loadSessions();
   const walls = sessions.flatMap((s) => s.walls.filter((w) => w.kind === 'five_hour'));
+  const events = sessions.flatMap((s) => wallEvents(s));
 
   console.log(`\nDataset`);
   console.log(`  sessions        ${sessions.length}`);
   console.log(`  usage records   ${sessions.reduce((a, s) => a + s.ev.length, 0)}`);
   console.log(
-    `  real 429 walls  ${walls.length} (five_hour) in ${sessions.filter((s) => s.walls.length).length} session(s)`,
+    `  real 429 walls  ${walls.length} tombstone(s) -> ${events.length} distinct event(s), ` +
+      `in ${sessions.filter((s) => s.walls.length).length} session(s)`,
   );
   console.log(`  wall clock      ${sessions.reduce((a, s) => a + s.hours, 0).toFixed(0)} h`);
 
@@ -377,13 +503,28 @@ async function main(): Promise<void> {
   console.log(`\nCost-model check -- weighted 5h spend at each real 429`);
   console.log(`  A tight spread means the cost model tracks the real limit. A wide one means`);
   console.log(`  five_hour levels here are shape-only and must not be read as percentages.`);
+  console.log(
+    ACCOUNT
+      ? `  scoring against the ACCOUNT's whole 5h spend -- every transcript summed.`
+      : `  scoring against each transcript's own turns only (--per-session).`,
+  );
+  const allEv = sessions.flatMap((s) => s.ev);
+  const accounts = new Map<string, AccountSpend>();
+  const acctFor = (w: Weights): AccountSpend => {
+    let a = accounts.get(w.name);
+    if (!a) {
+      a = new AccountSpend(allEv, w);
+      accounts.set(w.name, a);
+    }
+    return a;
+  };
   let best: { w: Weights; cap: number; cv: number } | null = null;
   for (const w of WEIGHTINGS) {
     const at: number[] = [];
     for (const s of sessions) {
       for (const wl of s.walls) {
         if (wl.kind !== 'five_hour') continue;
-        const v = fiveHourSeries(s.ev, w, [wl.t])[0]!;
+        const v = ACCOUNT ? acctFor(w).at(wl.t) : fiveHourSeries(s.ev, w, [wl.t])[0]!;
         if (v > 0) at.push(v);
       }
     }
@@ -427,7 +568,16 @@ async function main(): Promise<void> {
   console.log(`       followed over the next ${HORIZON_MIN} min. Scale-invariant, so the capacity`);
   console.log(`       constant above cannot flatter it.`);
   console.log(`  meas share of ticks where a rate was computable at all -- a blind estimator`);
-  console.log(`       scores a perfect error by never predicting.\n`);
+  console.log(`       scores a perfect error by never predicting.`);
+  // Structurally pessimistic under account-wide scoring, and not an alarm rate: when
+  // several sessions share the budget they all see the same exhausted window, and only
+  // the one that made the next request gets the tombstone. The others warned correctly
+  // about a wall they did not personally hit.
+  if (ACCOUNT) {
+    console.log(`  falseLAND inflated here: concurrent sessions all see the same exhausted`);
+    console.log(`       window, but only one of them records the 429.`);
+  }
+  console.log('');
 
   interface Row {
     alpha: number;
@@ -448,7 +598,8 @@ async function main(): Promise<void> {
     for (const wm of WINDOWS) {
       for (const ms of SAMPLES) {
         const sc = newScore();
-        for (const s of sessions) replay(s, best.w, best.cap, a, wm, ms, sc);
+        for (const s of sessions)
+          replay(s, best.w, best.cap, a, wm, ms, sc, null, ACCOUNT ? acctFor(best.w) : null);
         rows.push({
           alpha: a,
           window_min: wm,
@@ -496,6 +647,51 @@ async function main(): Promise<void> {
         `err_p50 ${fx(r.err_p50, 3)}  err_p90 ${fx(r.err_p90, 2)}  flips ${r.flips}  ` +
         `missed ${r.missed}  falseLAND ${r.falseLand}`,
     );
+  }
+
+  // ---- Step 3: why every real wall was or was not warned about.
+  // No parameter in the grid moves warned/missed, which is itself the finding: the misses
+  // are properties of what was observable, not of the smoothing. This names each one.
+  if (DIAGNOSE) {
+    const cfgA = ALPHAS[0]!;
+    const cfgW = WINDOWS[0]!;
+    const cfgS = SAMPLES[0]!;
+    console.log('');
+    console.log(
+      `Per-wall diagnosis -- alpha ${cfgA}, window_min ${cfgW}, max_samples ${cfgS}`,
+    );
+    console.log('  age    how long the session had run when the wall hit');
+    console.log('  used   reconstructed 5h level at that moment, peak the worst mode in the hour before');
+    console.log('  lead   minutes of LAND-or-worse warning before it, or the reason there was none');
+    console.log('');
+    const diag: WallDiag[] = [];
+    const sc = newScore();
+    for (const s2 of sessions) {
+      if (!wallEvents(s2).length) continue;
+      replay(s2, best.w, best.cap, cfgA, cfgW, cfgS, sc, diag, ACCOUNT ? acctFor(best.w) : null);
+    }
+    const dh = 'session                    age     used  burn    mode      peak      lead';
+    console.log(dh);
+    console.log('-'.repeat(dh.length));
+    for (const d of diag.sort((a, b) => a.session.localeCompare(b.session) || a.ageMin - b.ageMin)) {
+      console.log(
+        `${d.session.slice(-26).padEnd(26)} ${fx(d.ageMin, 0).padStart(4)}m  ` +
+          `${(d.usedPct === null ? '-' : String(d.usedPct)).padStart(4)}%  ` +
+          `${(d.burn === null ? '-' : d.burn.toFixed(2)).padStart(5)}  ` +
+          `${d.mode.padEnd(9)} ${d.peak.padEnd(9)} ` +
+          `${d.leadMin === null ? d.reason : fx(d.leadMin, 1) + 'm'}`,
+      );
+    }
+    const byReason = new Map<string, number>();
+    for (const d of diag) {
+      const key = d.leadMin !== null ? 'warned' : d.reason.split(' -- ')[0]!.split(' — ')[0]!;
+      byReason.set(key, (byReason.get(key) ?? 0) + 1);
+    }
+    console.log('');
+    console.log(`Outcome of ${diag.length} distinct wall event(s):`);
+    for (const [k, v] of [...byReason].sort((a, b) => b[1] - a[1])) {
+      console.log(`  ${String(v).padStart(3)}  ${k}`);
+    }
   }
 
   if (JSON_OUT) {

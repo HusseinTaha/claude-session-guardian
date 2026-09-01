@@ -26,22 +26,34 @@ close, it seals a handoff so the next session can pick the work up exactly where
 
 ## Install
 
+Guardian is two halves, and a full install wants both.
+
+| Half | Gives you | Installed by |
+|---|---|---|
+| the binary | the gauge, the state, every CLI command | `npm install -g .` |
+| the plugin | the hooks that act on that state, the `guardian-protocol` skill, `/guardian` | `claude plugin install` |
+
 ```bash
 git clone <this repo> && cd claude-session-guardian
 npm install
 npm run build
-node dist/guardian.cjs install
+
+npm install -g .            # puts `claude-guardian` on PATH, everywhere
+claude-guardian install     # wires the status line into ~/.claude/settings.json
+
+claude plugin marketplace add .
+claude plugin install claude-session-guardian@claude-session-guardian
 ```
 
-Then **restart Claude Code**. The status line command is read at startup, so a running
-session will not pick it up.
+Then **restart Claude Code**. Both the status line command and the plugin are read at
+startup, so a running session will not pick either up.
 
 ```
-$ node dist/guardian.cjs install
+$ claude-guardian install
 Guardian installed.
   settings: C:\Users\you\.claude\settings.json
   command:  node "C:/path/to/dist/guardian.cjs" sense
-  chained your existing status line: ~/.claude/my-bar.sh
+  chained your existing status line: node "C:\...\mcp-claude-sharedctx\dist\cli.js" statusline
 
 Restart Claude Code — the status line command is read at startup.
 ```
@@ -49,20 +61,20 @@ Restart Claude Code — the status line command is read at startup.
 Note the third line. If you already had a status line, Guardian **keeps** it: it runs your
 command on every tick and appends its own segment. Nothing you had is lost.
 
-As a plugin instead:
-
 ```
-/plugin marketplace add <this repo>
-/plugin install claude-session-guardian
+🐝 hive · c3804 · 0f/0d  🛡 LAND ctx ▓▓▓▓▓░░░░░ 53% ⚠ ~21m  5h ▓▓▓▓▓▓▓▓▓░ 89% ⚠ ~3m
+└──────── the status line you had ─────────┘└──────── Guardian's segment ────────┘
 ```
 
-The plugin brings the hooks with it, which is what makes compaction survivable. Without
-them you still get the gauge, but not the handoff.
+**Skipping the plugin is the common mistake.** Without its hooks nothing acts on its own:
+no seal before compaction, no spawn gate near a wall, no Stop brake, no 429 recovery. You
+get a gauge that tells you the truth and then lets you drive into the wall anyway.
 
 To remove everything:
 
 ```bash
-node dist/guardian.cjs uninstall     # restores your old status line, deletes checkpoint refs
+claude-guardian uninstall            # restores your old status line, deletes checkpoint refs
+claude plugin uninstall claude-session-guardian
 rm -rf .claude/guardian              # and the state, if you want it gone
 ```
 

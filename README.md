@@ -100,18 +100,35 @@ log` never shows it, `.gitignore` is honoured, and `uninstall` deletes every ref
 
 ## Install
 
+Two halves, and you want both. The **binary** senses and holds the state; the **plugin**
+carries the hooks that act on it, plus the `/guardian` commands.
+
 ```bash
 npm install && npm run build
-node dist/guardian.cjs install     # or: /guardian install
+npm install -g .                                    # puts `claude-guardian` on PATH
+claude-guardian install                             # wires the status line
+
+claude plugin marketplace add .                     # hooks, skill and /guardian commands
+claude plugin install claude-session-guardian@claude-session-guardian
 ```
 
-Then **restart Claude Code** — the status line command is read at startup.
+Then **restart Claude Code** — the status line command and the plugin are both read at
+startup.
+
+With only the binary you get the gauge and every CLI command, but nothing acts on its own:
+no seal at compaction, no spawn gate, no Stop brake. Those are the hooks.
 
 `install` never clobbers an existing status line. If you already have one, it is recorded
-and re-run by the sensor on every tick, with Guardian's segment appended.
+and re-run by the sensor on every tick, with Guardian's segment appended:
 
 ```
-node dist/guardian.cjs uninstall   # restores exactly what was there before
+🐝 hive · c3804 · 0f/0d  🛡 LAND ctx ▓▓▓▓▓░░░░░ 53% ⚠ ~21m  5h ▓▓▓▓▓▓▓▓▓░ 89% ⚠ ~3m
+└──────── your existing status line ────────┘└──────── Guardian's segment ────────┘
+```
+
+```
+claude-guardian uninstall          # restores exactly what was there before
+claude plugin uninstall claude-session-guardian
 ```
 
 ## Usage
@@ -271,22 +288,41 @@ no memory of the work cannot say what to do next, neither could you tomorrow.
 node --experimental-strip-types scripts/calibrate.ts
 ```
 
-`scripts/calibrate.ts` replays every transcript in `~/.claude/projects` — here 43 sessions,
-106k usage records, 1,046 hours, 22 real `five_hour` 429s — through the real estimator, and
+`scripts/calibrate.ts` replays every transcript in `~/.claude/projects` — here 45 sessions,
+106k usage records, 1,047 hours, 22 real `five_hour` 429s — through the real estimator, and
 scores predicted burn against the burn that actually followed over the next five minutes.
 That score is a *relative* error, so it survives not knowing Anthropic's token weighting:
 any linear rescaling of the percentage axis cancels out.
 
-It is a defect-finder as much as a tuner. It is what caught the sample-thinning bug where a
-status line firing faster than the thinning interval kept overwriting the same slot, so the
-series never grew and the burn rate stayed permanently unmeasurable in exactly the busy
-sessions that need it. On the fixed estimator, `window_min: 15` scores a median relative
-error of **0.41** against **0.46** at 10 minutes, at both the idle and the busy cadence —
-which is where the shipped default comes from.
+It is a defect-finder as much as a tuner. It caught the sample-thinning bug where a status
+line firing faster than the thinning interval kept overwriting the same slot, so the series
+never grew and the burn rate stayed permanently unmeasurable in exactly the busy sessions
+that need it. On the fixed estimator, `window_min: 15` scores a median relative error of
+**0.41** against **0.46** at 10 minutes, at both the idle and the busy cadence, and it stays
+the optimum under the account-wide reconstruction below — which is where the default comes
+from.
 
-The level-dependent columns it prints (`warned/missed`, `falseLAND`) are labelled
-untrustworthy in its own output, and they mean it: the implied 5-hour capacity solved from
-the observed 429s has a 51% spread, so those columns are shape, not detection rates.
+`--diagnose` answers the question the grid cannot: **why** a real 429 arrived unwarned. It
+prints one row per wall with the level, burn, mode and lead at that moment, and names the
+reason when there was no warning. Three things it established here:
+
+- **22 tombstones are 16 walls.** A 429 storm is one wall hit repeatedly; the retries were
+  being counted as separate misses.
+- **A warning that never stopped was being scored as a miss.** Episodes were recorded by
+  start time and had to begin within the hour before the wall, so a LAND that started two
+  hours earlier and was still running when the wall hit counted against the estimator.
+- **The 5-hour budget is per account, not per session.** A transcript cannot see what other
+  sessions are spending against the same window. Summing every transcript on the machine
+  drops the implied-capacity spread from **51% to 32%** and is now the default
+  (`--per-session` reverts it).
+
+After all three: 10 of 16 walls warned, and every remaining miss sits where the offline
+reconstruction still reads far below the wall (21–85% when the API said 100%) — a limit of
+rebuilding the number from transcripts, not of the estimator. **In production Guardian
+reconstructs nothing**: it reads `rate_limits.five_hour.used_percentage` from the status
+line payload, which is the account's own figure. `falseLAND` is now structurally
+pessimistic for the same reason — concurrent sessions all see one exhausted window, and
+only the one that made the next request records the 429.
 
 ## Design rules
 

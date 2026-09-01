@@ -20,6 +20,5 @@
     "./commands/guardian-agents.md",
     "./commands/guardian-doctor.md"
   ],
-  "hooks": "./hooks/hooks.json",
   "skills": "./skills/"
 }
