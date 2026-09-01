@@ -58,6 +58,24 @@ function axisSegment(
 }
 
 /** One short line. The status bar has limited width and Guardian is a passenger on it. */
+/** Token counts as people say them: `128k`, `1M`, `840`.
+ *
+ *  A percentage answers "how full", and only that. Near a wall the other question is how
+ *  much room is actually left, and 6% of a 1M window is not the same amount of work as 6%
+ *  of a 200k one. */
+export function fmtTokens(n: number): string {
+  if (!Number.isFinite(n) || n < 0) return '?';
+  if (n >= 1e6) {
+    const m = n / 1e6;
+    return `${m >= 10 || Number.isInteger(m) ? m.toFixed(0) : m.toFixed(1)}M`;
+  }
+  // One decimal below 10k, where rounding to the nearest thousand would turn a 1450 tok/min
+  // pace into "1k/min" and a nearly-empty window into "10k".
+  if (n >= 10_000) return `${Math.round(n / 1000)}k`;
+  if (n >= 1000) return `${(Math.round(n / 100) / 10).toFixed(1)}k`;
+  return `${Math.round(n)}`;
+}
+
 export function renderStatus(state: GuardianState, cfg: GuardianConfig): string {
   const color = cfg.render.color;
   const paint = (s: string, c: string) => (color ? `${c}${s}${C.reset}` : s);

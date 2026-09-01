@@ -4,7 +4,7 @@ import { senseAgents } from './sensors/subagents.ts';
 import { install, init, uninstall, findGuardianSettings, guardianCommand } from './ui/install.ts';
 import { loadConfig } from './core/config.ts';
 import { readState, writeState } from './core/state.ts';
-import { renderDashboard } from './format/render.ts';
+import { renderDashboard, fmtTokens } from './format/render.ts';
 import { statePath, userSettingsPath, resolveStateRoot, stateDir } from './core/paths.ts';
 import { handle } from './actuators/dispatch.ts';
 import { latestSessionIn as latestSession } from './core/sessions.ts';
@@ -42,7 +42,7 @@ import {
 } from './ui/configCmd.ts';
 import { configPath } from './core/paths.ts';
 import { DEFAULT_CONFIG } from './core/config.ts';
-import { fmtMin } from './budget/mode.ts';
+import { fmtMin, fmtElapsed } from './budget/mode.ts';
 
 function readStdin(): string {
   try {
@@ -616,20 +616,48 @@ function main(argv: string[]): number {
       const f = sid ? readAgents(projectDir, sid) : null;
       const live = f ? Object.values(f.agents) : [];
       if (!live.length) out('No live subagents recorded.\n');
-      for (const a of live) {
-        const ctx =
-          a.context_window && a.token_count !== null
-            ? `${((a.token_count / a.context_window) * 100).toFixed(0)}% ctx`
-            : 'ctx unknown';
-        const pace = a.tokens_per_min ? `${a.tokens_per_min.toFixed(0)} tok/min` : 'pace unknown';
-        out(`${(a.name ?? a.type ?? a.id).padEnd(24)} ${ctx.padEnd(12)} ${pace}\n`);
+      else {
+        const stats0 = typeStats(projectDir);
+        // A table, not a paragraph: these columns are compared down the page, and a ragged
+        // one hides the outlier that the whole display exists to surface. Widths come from
+        // the data -- a padEnd(24) guess is exactly where alignment breaks.
+        const rows = live.map((a) => {
+          const typical = a.type ? stats0[a.type] : undefined;
+          return [
+            a.name ?? a.type ?? a.id,
+            a.context_window && a.token_count !== null
+              ? `${fmtTokens(a.token_count)}/${fmtTokens(a.context_window)}`
+              : a.token_count !== null
+                ? fmtTokens(a.token_count)
+                : '—',
+            a.context_window && a.token_count !== null
+              ? `${((a.token_count / a.context_window) * 100).toFixed(0)}%`
+              : '—',
+            a.tokens_per_min ? `${fmtTokens(a.tokens_per_min)}/min` : '—',
+            a.started_at ? fmtElapsed((now() - a.started_at) / 60) : '—',
+            typical ? `≈${fmtMin(typical.median_s / 60)}` : '—',
+          ];
+        });
+        const header = ['AGENT', 'CONTEXT', 'FULL', 'PACE', 'ELAPSED', 'TYPICAL'];
+        // Only the name reads left-to-right; every other column is a quantity, and quantities
+        // line up on the right or they cannot be compared at a glance.
+        const right = [false, true, true, true, true, true];
+        const w = header.map((h, i) => Math.max(h.length, ...rows.map((r) => r[i]!.length)));
+        const line = (cells: string[]) =>
+          cells
+            .map((c, i) => (right[i] ? c.padStart(w[i]!) : c.padEnd(w[i]!)))
+            .join('  ')
+            .trimEnd();
+        out(`${line(header)}\n`);
+        for (const r of rows) out(`${line(r)}\n`);
       }
       const stats = typeStats(projectDir);
       const entries = Object.entries(stats);
       if (entries.length) {
         out('\nHistorical duration by agent type:\n');
+        const tw = Math.max(...entries.map(([t]) => t.length));
         for (const [type, st] of entries) {
-          out(`  ${type.padEnd(24)} median ${fmtMin(st.median_s / 60)} (n=${st.count})\n`);
+          out(`  ${type.padEnd(tw)}  median ${String(fmtMin(st.median_s / 60)).padStart(6)}  (n=${st.count})\n`);
         }
       } else {
         out('\nNo completed agents recorded yet, so no duration history.\n');

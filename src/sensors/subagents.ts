@@ -12,6 +12,7 @@ import { resolveStateRoot } from '../core/paths.ts';
 import { loadConfig } from '../core/config.ts';
 import { log } from '../core/log.ts';
 import { fmtMin, fmtElapsed } from '../budget/mode.ts';
+import { fmtTokens } from '../format/render.ts';
 
 interface SubagentPayload {
   session_id?: string;
@@ -34,10 +35,13 @@ export function renderAgentRow(
   const parts: string[] = [];
   parts.push(a.name ?? a.type ?? a.id.slice(0, 8));
 
+  // Absolute first, percentage after: 6% of a 1M window and 6% of a 200k one are different
+  // amounts of remaining work, and the row is read to decide whether to let an agent finish.
   if (a.context_window && a.token_count !== null) {
-    parts.push(`ctx ${((a.token_count / a.context_window) * 100).toFixed(0)}%`);
+    const pct = ((a.token_count / a.context_window) * 100).toFixed(0);
+    parts.push(`ctx ${fmtTokens(a.token_count)}/${fmtTokens(a.context_window)} (${pct}%)`);
   } else if (a.token_count !== null) {
-    parts.push(`${(a.token_count / 1000).toFixed(1)}k tok`);
+    parts.push(`ctx ${fmtTokens(a.token_count)}`);
   }
 
   if (a.started_at) {

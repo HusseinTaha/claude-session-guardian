@@ -216,11 +216,13 @@ runs of that agent type in this project, labelled `≈` with its sample size —
 of history, never dressed up as a prediction about the run in front of you.
 
 ```
-Explore · map every call site of recordSample · ctx 18% · 2m of ≈5m (n=5)
-Build endpoint · add POST /orders and its tests · ctx 91% · 2m of ≈18m (n=3) · ⚠ ctx full ~1m
+Explore · map every call site of recordSample · ctx 36k/200k (18%) · 2m of ≈5m (n=5)
+Build endpoint · add POST /orders and its tests · ctx 182k/200k (91%) · 2m of ≈18m (n=3) · ⚠ ctx full ~1m
 ```
 
-Each row leads with what that agent was asked to do, because two agents of the same type
+Context is shown in tokens as well as percent, because 13% of a 1M window and 13% of a 200k
+one are different amounts of remaining work. Each row leads with what that agent was asked to
+do, because two agents of the same type
 are otherwise indistinguishable. On a narrow terminal the description is what gives — never
 the meters.
 

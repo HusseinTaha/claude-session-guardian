@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -176,4 +176,53 @@ test('the observe-and-maybe-seal path stays cheap on a calm session', () => {
   const p50 = times[Math.floor(times.length * 0.5)]!;
   console.log(`      PostToolUse p50 ${p50.toFixed(2)}ms`);
   assert.ok(p50 < 25, `p50 was ${p50.toFixed(2)}ms`);
+});
+
+/** The agents section is a table, and a table that does not line up hides the outlier the
+ *  display exists to surface. Widths come from the data, so this asserts the invariant
+ *  rather than a hard-coded layout: every row's columns start at the same offsets. */
+test('the agents table lines up, and carries absolute context alongside the percentage', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'guardian-tab-'));
+  const sessions = join(dir, '.claude', 'guardian', 'sessions');
+  mkdirSync(sessions, { recursive: true });
+  const agent = (id: string, name: string, tok: number, win: number | null, tpm: number | null) => ({
+    id,
+    name,
+    type: name,
+    status: 'running',
+    description: 'do a thing',
+    started_at: 1_800_000_000,
+    token_count: tok,
+    context_window: win,
+    samples: [],
+    tokens_per_min: tpm,
+  });
+  writeFileSync(
+    join(sessions, 'sess.agents.json'),
+    JSON.stringify({
+      schema: 1,
+      session_id: 'sess',
+      updated_at: 1_800_000_000,
+      agents: {
+        a1: agent('a1', 'Explore', 84_000, 200_000, 1450),
+        a2: agent('a2', 'general-purpose', 128_000, 1_000_000, 6200),
+        a3: agent('a3', 'x', 500, null, null),
+      },
+    }),
+  );
+
+  const r = spawnSync(process.execPath, [BUNDLE, 'agents'], { cwd: dir, encoding: 'utf8' });
+  assert.equal(r.status, 0);
+  const lines = r.stdout.split('\n').filter((l) => /Explore|general-purpose|AGENT/.test(l));
+  assert.equal(lines.length, 3, 'a header and one row per agent');
+
+  assert.match(r.stdout, /84k\/200k/);
+  assert.match(r.stdout, /128k\/1M/);
+  assert.match(r.stdout, /1\.5k[/]min/);
+
+  // Alignment: the column the percentages sit in starts at one offset for every row.
+  const offsets = lines.slice(1).map((l) => l.indexOf('%') - String(l.match(/(\d+)%/)?.[1] ?? '').length);
+  assert.equal(new Set(offsets).size, 1, `percent column ragged: ${JSON.stringify(lines)}`);
+  const headerFull = lines[0]!.indexOf('FULL');
+  assert.ok(headerFull > 0 && lines.slice(1).every((l) => l.length >= headerFull));
 });

@@ -436,15 +436,19 @@ Guardian does three things about it.
 The agent panel rows carry the task, then the facts that inform a decision about it:
 
 ```
-Explore · map every call site of recordSample · ctx 18% · 2m of ~5m (n=5)
-Build endpoint · add POST /orders and its tests · ctx 91% · 2m of ~18m (n=3) · WARN ctx full ~1m
+Explore · map every call site of recordSample · ctx 36k/200k (18%) · 2m of ~5m (n=5)
+Build endpoint · add POST /orders and its tests · ctx 182k/200k (91%) · 2m of ~18m (n=3) · WARN ctx full ~1m
 ```
 
 - **The description** — what that agent was actually asked to do. Two agents of the same
   type are otherwise indistinguishable, and "which of these do I let finish" is a question
   about the work. On a narrow terminal this is the part that gets truncated, never the
   meters: the context warning and the clock are what the decision is made on.
-- **`ctx 91%`** — how full that agent's own context window is.
+- **`ctx 182k/200k (91%)`** — how much of that agent's own context window it has used, in
+  tokens as well as percent. The percentage alone is not enough: 13% of a 1M window and 13%
+  of a 200k one are different amounts of remaining work, and this row is read to decide
+  whether to let an agent keep going. With no window reported, the count stands alone
+  (`ctx 9.5k`) rather than implying a percentage nobody knows.
 - **`2m of ~18m (n=3)`** — two minutes elapsed, against a **median of 3 past runs** of that
   agent type in this project. The `~` and the `n=` are deliberate: it is a measurement of
   history, not a prediction about this run. Guardian cannot know how much work an agent has
@@ -456,14 +460,20 @@ History accumulates across sessions:
 
 ```
 $ guardian agents
-Explore                  18% ctx      2100 tok/min
+AGENT             CONTEXT  FULL      PACE  ELAPSED  TYPICAL
+Explore          36k/200k   18%  2.1k/min       2m      ~5m
+general-purpose   128k/1M   13%  6.2k/min      19m     ~18m
 
 Historical duration by agent type:
-  Explore                  median 5m (n=5)
-  general-purpose          median 18m (n=3)
+  Explore          median     5m  (n=5)
+  general-purpose  median    18m  (n=3)
 ```
 
-That table is what makes "will this delegation fit in my remaining budget?" answerable.
+Column widths come from the data, and every quantity is right-aligned: these columns are
+compared down the page, and a ragged one hides the outlier the display exists to surface.
+`FULL` is the percentage, `CONTEXT` the tokens behind it, `TYPICAL` the median of past runs
+of that type. That is what makes "will this delegation fit in my remaining budget?"
+answerable.
 
 ### At PREPARE, it makes new agents self-checkpointing
 

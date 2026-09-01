@@ -105,6 +105,17 @@ reconstruction still reads far below the wall. None is an estimator blind spot.
   `landing.inject_from land` used to be accepted and silently matched nothing, which made
   Guardian inject at every mode rather than the one asked for.
 
+### Agent rows and the agents table
+
+- **Context is reported in tokens as well as percent**: `ctx 128k/1M (13%)` in the agent
+  panel, and `CONTEXT` / `FULL` columns in `guardian agents`. A percentage answers "how
+  full" and only that — 13% of a 1M window is not the same amount of remaining work as 13%
+  of a 200k one, and that row exists to decide whether to let an agent finish. With no window
+  reported the count stands alone rather than implying a percentage nobody knows.
+- **`guardian agents` is a real table**: header, widths derived from the data, every quantity
+  right-aligned, and `ELAPSED`/`TYPICAL` alongside pace. A `padEnd(24)` guess is exactly
+  where alignment breaks, and a ragged column hides the outlier the display exists to show.
+
 ### Found by using the auto-seal
 
 - **A command's verdict was never read on a real machine: 154 of 154 recorded commands had

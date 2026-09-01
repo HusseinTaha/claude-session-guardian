@@ -19,6 +19,7 @@ import {
 } from '../src/sensors/agents.ts';
 import { senseAgents, renderAgentRow } from '../src/sensors/subagents.ts';
 import { sense } from '../src/sensors/statusline.ts';
+import { fmtTokens } from '../src/format/render.ts';
 import { gateSpawn, markBoundary, isSafeBoundaryCommand, globToRegExp } from '../src/actuators/gate.ts';
 import { emptyState, writeState, readState } from '../src/core/state.ts';
 import { DEFAULT_CONFIG } from '../src/core/config.ts';
@@ -148,7 +149,7 @@ test('an agent row shows context fill and pace against a labelled historical med
   }
   const row = renderAgentRow(f.agents.a1!, typeStats(dir), T + 180, 200);
   assert.match(row, /Explore/);
-  assert.match(row, /ctx 13%/);
+  assert.match(row, /ctx 26k[/]200k [(]13%[)]/);
   // The median is marked as a median with its sample size, not passed off as a prediction.
   assert.match(row, /3m of ≈6m \(n=3\)/);
 });
@@ -475,13 +476,46 @@ test('a row says what the agent is doing, and the meters survive a narrow termin
   };
   const wide = renderAgentRow(a, {}, T, 120);
   assert.match(wide, /Explore · map every call site/);
-  assert.match(wide, /ctx 21%/);
+  assert.match(wide, /ctx 42k[/]200k [(]21%[)]/);
 
   // Narrow: the description is what gives, because the meter and the clock are what a
   // decision near a wall is made on. Trimming the whole line would cut those instead.
   const narrow = renderAgentRow(a, {}, T, 60);
   assert.ok(narrow.length <= 60, `row was ${narrow.length} chars: ${narrow}`);
-  assert.match(narrow, /ctx 21%/);
+  assert.match(narrow, /ctx 42k[/]200k [(]21%[)]/);
   assert.match(narrow, /3m elapsed/);
   assert.match(narrow, /…/);
+});
+
+// ------------------------------------------------------------------ token counts
+
+test('token counts read the way people say them', () => {
+  assert.equal(fmtTokens(128_000), '128k');
+  assert.equal(fmtTokens(1_000_000), '1M');
+  assert.equal(fmtTokens(1_400_000), '1.4M');
+  assert.equal(fmtTokens(200_000), '200k');
+  // Below 10k a rounded thousand loses the distinction that matters: a 1450 tok/min pace
+  // is not "1k/min", and a 9.5k window is not "10k".
+  assert.equal(fmtTokens(1450), '1.5k');
+  assert.equal(fmtTokens(9500), '9.5k');
+  assert.equal(fmtTokens(840), '840');
+  assert.equal(fmtTokens(Number.NaN), '?');
+});
+
+test('an agent row carries the absolute context, not only how full it is', () => {
+  const rowFor = (tokenCount: number, contextWindowSize: number | undefined) => {
+    const f = updateAgents(
+      emptyAgents('s1'),
+      [{ id: 'a1', name: 'Explore', type: 'Explore', startTime: T * 1000, tokenCount, ...(contextWindowSize ? { contextWindowSize } : {}) }],
+      T + 30,
+    );
+    return renderAgentRow(f.agents.a1!, {}, T + 60, 200);
+  };
+
+  // 13% of 1M and 13% of 200k are different amounts of remaining work.
+  assert.match(rowFor(128_000, 1_000_000), /ctx 128k[/]1M [(]13%[)]/);
+
+  const unknown = rowFor(9500, undefined);
+  assert.match(unknown, /ctx 9\.5k/);
+  assert.doesNotMatch(unknown, /%/, 'no window means no percentage to claim');
 });
