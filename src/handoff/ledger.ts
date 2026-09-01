@@ -70,10 +70,22 @@ const TEST_RE = /\b(npm|pnpm|yarn|bun)\s+(run\s+)?(test|check)\b|\bnode\s+--test
 const BUILD_RE = /\b(npm|pnpm|yarn|bun)\s+run\s+build\b|\btsc\b|\bcargo\s+build\b|\bgo\s+build\b|\bdotnet\s+build\b|\bmake\b|\bwebpack\b|\bvite\s+build\b/;
 const GIT_RE = /^\s*git\s/;
 
+/** Everything before the first heredoc marker.
+ *
+ *  A heredoc body is data, not commands: a commit message, a python script patching a doc.
+ *  Classifying the whole line reads that data as instructions — and a commit message
+ *  describing a bad test baseline got itself recorded as the test baseline, which is a neat
+ *  demonstration and a useless handoff. */
+function commandHead(cmd: string): string {
+  const i = cmd.indexOf('<<');
+  return i === -1 ? cmd : cmd.slice(0, i);
+}
+
 export function classifyCommand(cmd: string): CommandKind {
-  if (TEST_RE.test(cmd)) return 'test';
-  if (BUILD_RE.test(cmd)) return 'build';
-  if (GIT_RE.test(cmd)) return 'git';
+  const head = commandHead(cmd);
+  if (TEST_RE.test(head)) return 'test';
+  if (BUILD_RE.test(head)) return 'build';
+  if (GIT_RE.test(head)) return 'git';
   return 'other';
 }
 
@@ -86,7 +98,7 @@ export function classifyCommand(cmd: string): CommandKind {
  *  that consumes a manifest. A baseline has to be the command, not the transcript of how it
  *  was invoked that once. */
 export function testCommand(cmd: string): string | null {
-  for (const segment of cmd.split(/;|&&|\|\||\n/)) {
+  for (const segment of commandHead(cmd).split(/;|&&|\|\||\n/)) {
     if (!TEST_RE.test(segment)) continue;
     // Drop a display pipeline and any redirection: `npm test 2>&1 | grep -E ...` is one
     // person's way of reading the output, not part of establishing the baseline.

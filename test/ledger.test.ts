@@ -160,3 +160,16 @@ test('the test baseline is the command, not the line it was buried in', () => {
   assert.equal(testCommand('cd x && pytest -q 2>&1 | tail -5'), 'pytest -q');
   assert.equal(testCommand('echo hi'), null);
 });
+
+test('a heredoc body is data, not the command it is passed to', () => {
+  // A commit message quoting `npm run check` classified the whole `git commit -F -` line as
+  // this session's test run, and its own text then became the recorded baseline.
+  const commit = [
+    'git add -A && git commit -F - <<EOF',
+    'fixed the npm run check baseline',
+    'EOF',
+  ].join(String.fromCharCode(10));
+  assert.equal(classifyCommand(commit), 'git');
+  assert.equal(testCommand(commit), null);
+  assert.equal(classifyCommand('npm run check 2>&1 | grep ok'), 'test');
+});
