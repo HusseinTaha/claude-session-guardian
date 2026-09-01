@@ -8,6 +8,7 @@ import {
   fileEvent,
   commandEvent,
   classifyCommand,
+  mentionsGitCommit,
   readLedger,
 } from '../handoff/ledger.ts';
 import {
@@ -152,7 +153,7 @@ function onPostToolUse(inp: HookInput, projectDir: string, sid: string, now: num
     // A commit is worth recording as a durable landmark, but the command text is not the
     // commit: `git commit -m x` may have failed, been amended, or been a --dry-run. Ask
     // git what HEAD actually is.
-    if (classifyCommand(cmd) === 'git' && /\bcommit\b/.test(cmd) && !/--dry-run/.test(cmd)) {
+    if (mentionsGitCommit(cmd)) {
       const sha = git(projectDir, ['rev-parse', 'HEAD']);
       const subject = git(projectDir, ['log', '-1', '--format=%s']);
       if (sha) {

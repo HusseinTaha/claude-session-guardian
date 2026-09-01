@@ -134,6 +134,12 @@ reconstruction still reads far below the wall. None is an estimator blind spot.
   the note — the heredoc rule with a different delivery, and found by doctor auditing the
   seal that recorded it. Classification blanks quoted spans; extraction still returns the
   original text.
+- **The heredoc fix threw away everything after the body.** Truncating at the first `<<`
+  meant a call that opened with a `python - <<PY` patch and went on to commit was classified
+  by the word `python`, so the commit never reached the manifest — Guardian's own handoff was
+  missing its own last commit, `0ef60d8`. Heredocs are removed marker-to-terminator now,
+  keeping what follows, and a commit is detected anywhere in the line rather than only when
+  the line begins with `git`.
 - `npm run perf` covers PostToolUse, which now runs on every tool call rather than on edits
   and shell commands only: p50 1.3ms.
 

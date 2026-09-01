@@ -48,7 +48,9 @@ bare form and handle the default in code you control.
 patch scripts; quoted arguments carry notes and handoff text. Pattern-matching the whole line
 made a commit message about a bad test baseline become the test baseline — and then, in the
 same repo, a `guardian note --next "...npm run check..."` become one. Anything classifying a
-command reads only up to `<<`, with quoted spans blanked out.
+command removes each heredoc from its marker to its terminator — never truncates at `<<`,
+which silently discarded the commands after the body — and blanks quoted spans before
+matching. Extraction still returns the original text.
 
 **A gauge must never contradict what it gauges.** The dashboard read `state.manifest` while
 the CLI's seal wrote only the manifest file, so it reported "not sealed" with a sealed

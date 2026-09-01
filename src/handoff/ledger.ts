@@ -77,8 +77,20 @@ const GIT_RE = /^\s*git\s/;
  *  describing a bad test baseline got itself recorded as the test baseline, which is a neat
  *  demonstration and a useless handoff. */
 function commandHead(cmd: string): string {
-  const i = cmd.indexOf('<<');
-  return i === -1 ? cmd : cmd.slice(0, i);
+  const stripped = stripHeredocs(cmd);
+  const i = stripped.indexOf('<<');
+  return i === -1 ? stripped : stripped.slice(0, i);
+}
+
+/** Remove each heredoc from its marker to its terminator, keeping what follows.
+ *
+ *  Truncating at the first `<<` was the earlier fix, and it threw away every command after
+ *  the body: a call that opened with a `python - <<PY` patch and went on to commit was
+ *  classified by the word `python`, so the commit never reached the manifest. Guardian's own
+ *  handoff was missing its own last commit. A heredoc with no terminator in sight -- a
+ *  clipped command -- matches nothing here, and the caller still truncates. */
+function stripHeredocs(cmd: string): string {
+  return cmd.replace(/<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_]*)\1[\s\S]*?^\2[ \t]*$/gm, '');
 }
 
 /** Blank out quoted spans, for classification only.
@@ -117,6 +129,16 @@ export function testCommand(cmd: string): string | null {
     if (bare) return bare;
   }
   return null;
+}
+
+/** Whether this line actually ran a commit, heredoc bodies and quoted text aside.
+ *
+ *  Not the same question as `classifyCommand(cmd) === 'git'`: that anchors on the start of
+ *  the line, and a commit is very often the second thing a line does. The sha is still taken
+ *  from git afterwards, never from the command text. */
+export function mentionsGitCommit(cmd: string): boolean {
+  const head = stripQuoted(commandHead(cmd));
+  return /\bgit\b[^|;&\n]*\bcommit\b/.test(head) && !/--dry-run/.test(head);
 }
 
 /** Guardian sees a command's output but not its exit code (PostToolUse carries the result in

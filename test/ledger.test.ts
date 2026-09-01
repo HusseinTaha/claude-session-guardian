@@ -1,4 +1,6 @@
 import { test } from 'node:test';
+
+const NL = String.fromCharCode(10);
 import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync, appendFileSync } from 'node:fs';
 import { tmpdir, homedir } from 'node:os';
@@ -13,6 +15,7 @@ import {
   hashFile,
   commandEvent,
   testCommand,
+  mentionsGitCommit,
 } from '../src/handoff/ledger.ts';
 import { resolveStateRoot, ledgerPath } from '../src/core/paths.ts';
 
@@ -187,4 +190,26 @@ test('a command quoted inside an argument is not the command being run', () => {
   assert.equal(classifyCommand('npm run check'), 'test');
   assert.equal(testCommand('npm test -- "auth flow"'), 'npm test -- "auth flow"');
   assert.equal(classifyCommand('git commit -m "npm run check was the baseline"'), 'git');
+});
+
+// Truncating at the first `<<` threw away every command after the body, so a call that
+// opened with a python heredoc and went on to commit was classified by the word `python`
+// and its commit never reached the manifest. Guardian's own handoff lost its own commit.
+test('a commit after a heredoc body is still seen as a commit', () => {
+  const line = [
+    "python - <<'PY'",
+    "import io",
+    "print('npm run check')",
+    'PY',
+    'git add -A -- src && git -c user.email=x commit -q -F - <<MSG',
+    'a message mentioning npm test',
+    'MSG',
+    'git log -1',
+  ].join(NL);
+
+  assert.equal(mentionsGitCommit(line), true);
+  assert.equal(testCommand(line), null, 'the heredoc bodies are still data');
+  assert.equal(mentionsGitCommit('git commit --dry-run -m x'), false);
+  assert.equal(mentionsGitCommit('echo "git commit -m x"'), false);
+  assert.equal(mentionsGitCommit('npm test'), false);
 });
