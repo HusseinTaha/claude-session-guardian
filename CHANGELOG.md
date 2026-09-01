@@ -84,6 +84,41 @@ reconstruction still reads far below the wall. None is an estimator blind spot.
 - **Each gauge carries its own colour** — green, amber, bold amber, red, inverted red —
   keyed on that axis's mode rather than its percentage, so a 94% window that refills faster
   than you burn it stays green.
+- **Guardian's segment takes the line below the bar it chained** (`statusline.own_line`).
+  Two full status lines on one row wrap in most terminals.
+- **Agent rows say what the agent is doing.** Replacing the default row had dropped its
+  description, leaving two agents of the same type indistinguishable. On a narrow terminal
+  the description absorbs the truncation alone — trimming the whole line took the context
+  warning and the clock, which are the fields a decision near a wall is made on.
+
+### Found by using it
+
+Everything below was found by running the tool against real work, after the suite was
+green. They are recorded because the pattern matters more than the individual bugs: each
+one looked like it was working.
+
+- **`doctor --cold` had never asked its question on Windows.** The prompt went in argv to a
+  `shell: true` spawn, which concatenates arguments unescaped, so `-p` received the single
+  word `Read`. The cold session answered *that*, and the keyword checks scored the reply.
+  The prompt goes on stdin now, and a marker token in the reply proves it arrived — a
+  prompt that never lands can no longer be scored as an answer.
+- **The resume protocol promised sections the digest did not carry** — "verify the file
+  hashes below" with no hashes below. A cold reader flagged it: it cannot tell a truncated
+  file from a lying one. Steps are built from what the manifest holds.
+- **A slow status line was deleted silently.** The chained command had a hard 1.5s limit; a
+  bar that walks a 62k-node index takes 2.8s, so it was killed every tick and two tools
+  vanished with no error. `statusline.chain_timeout_ms` (default 5000), a `⋯` where the
+  segment should be, and a line in the log.
+- **`/guardian resume` ran `guardian status`.** The command files used `${ARGUMENTS:-status}`,
+  which Claude Code does not substitute — the shell did, saw an unset variable, and took its
+  own default. Commands pass `$ARGUMENTS` bare; no arguments now means the dashboard.
+- **The dashboard said "Manifest: not sealed"** beside a sealed manifest, because only the
+  hook path recorded a seal in state.
+- **The recorded test baseline was the whole compound line** a test happened to sit inside,
+  and the resume protocol told the next session to run it verbatim — including a global
+  install. Then the fix proved insufficient in the same way: a commit message *describing*
+  that bug quoted `npm run check`, and the classifier read the heredoc body as commands. A
+  heredoc body is data; classification stops at the first `<<`.
 
 ## 0.5.0
 

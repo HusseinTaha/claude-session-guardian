@@ -7,7 +7,7 @@ and lands the session before it hits.
 > ledger, handoff manifest, lossless compaction, verified resume, git checkpoints; per-agent
 > sensing, the spawn gate, self-checkpointing subagents; tiered injection, the Stop brake,
 > 429 recovery; a validated config CLI, the `doctor` self-check with a cold-resume harness,
-> and an optional three-tool MCP server. 198 tests.
+> and an optional three-tool MCP server. 204 tests.
 >
 > **[Full user guide with examples →](docs/GUIDE.md)**
 
@@ -139,12 +139,19 @@ and keeps the displaced command running first — expanding `${CLAUDE_PROJECT_DI
 `${VAR:-default}` the way Claude Code would, which `cmd.exe` will not.
 
 `install` never clobbers an existing status line. If you already have one, it is recorded
-and re-run by the sensor on every tick, with Guardian's segment appended:
+and re-run by the sensor on every tick, with Guardian's segment on the line below —
+`statusline.own_line: false` puts it back on the same row:
 
 ```
-🐝 hive · c3804 · 0f/0d  🛡 LAND ctx ▓▓▓▓▓░░░░░ 53% ⚠ ~21m  5h ▓▓▓▓▓▓▓▓▓░ 89% ⚠ ~3m
-└──────── your existing status line ────────┘└──────── Guardian's segment ────────┘
+◤ graft · 318 nodes / 1161 edges  🐝 hive · c3804 · 0f/0d       ← the bar you had
+🛡 LAND ctx ▓▓▓▓▓░░░░░ 53% ⚠ ~21m  5h ▓▓▓▓▓▓▓▓▓░ 89% ⚠ ~3m     ← Guardian
 ```
+
+The command it re-runs is re-read from its source file every tick rather than snapshotted,
+so a tool that manages its own status line keeps control of it. It gets
+`statusline.chain_timeout_ms` (5s) to produce something; a bar that walks a large index can
+need it, and one that runs out leaves `⋯` and a line in `guardian log` rather than quietly
+vanishing.
 
 ```
 guardian uninstall          # restores exactly what was there before
@@ -209,9 +216,13 @@ runs of that agent type in this project, labelled `≈` with its sample size —
 of history, never dressed up as a prediction about the run in front of you.
 
 ```
-Explore · ctx 18% · 2m of ≈5m (n=5)
-Build endpoint · ctx 91% · 2m of ≈18m (n=3) · ⚠ ctx full ~1m
+Explore · map every call site of recordSample · ctx 18% · 2m of ≈5m (n=5)
+Build endpoint · add POST /orders and its tests · ctx 91% · 2m of ≈18m (n=3) · ⚠ ctx full ~1m
 ```
+
+Each row leads with what that agent was asked to do, because two agents of the same type
+are otherwise indistinguishable. On a narrow terminal the description is what gives — never
+the meters.
 
 **It annotates.** At `PREPARE`, `PreToolUse` returns `updatedInput` and rewrites the agent's
 own prompt: write findings to disk as you go, prefer a partial answer to nothing. An agent
@@ -368,7 +379,7 @@ it holds prompts and paths and does not belong in a commit.
 ## Development
 
 ```bash
-npm run check      # typecheck + layer check + build + 198 tests
+npm run check      # typecheck + layer check + build + 204 tests
 npm run layers     # assert imports only point downward
 ```
 

@@ -38,6 +38,25 @@ directory installs everything in it, `.mcp.json` included, and Claude Code enabl
 finds. Run `npm run stage-plugin` (part of `npm run check`) and add new payload entries to
 its explicit list.
 
+**Substitution happens at a layer you did not pick.** `${VAR:-default}` looks like it
+handles the empty case and does not: whoever expands it first wins, and that is never the
+layer you meant. It cost a chained status line (cmd.exe cannot expand it) and a slash
+command's argument (Claude Code substitutes `$ARGUMENTS`, not the `:-` form). Prefer the
+bare form and handle the default in code you control.
+
+**A command's payload is data, not commands.** Heredoc bodies carry commit messages and
+patch scripts. Pattern-matching the whole line made a commit message about a bad test
+baseline become the test baseline. Anything classifying a command reads only up to `<<`.
+
+**A gauge must never contradict what it gauges.** The dashboard read `state.manifest` while
+the CLI's seal wrote only the manifest file, so it reported "not sealed" with a sealed
+manifest beside it. Every write path that changes an observable fact updates the state the
+display reads.
+
+**Failing open is not the same as failing silently.** Dropping the user's status line
+because it took 2.8s is the correct fallback and an unacceptable one to perform quietly.
+Where a path swallows a failure, it leaves a mark on the bar and a line in `guardian log`.
+
 **Burn defaults are calibrated, not chosen.** `scripts/calibrate.ts` replays real transcripts
 from `~/.claude/projects`. Changing `burn.*` means re-running it, not reasoning about it.
 

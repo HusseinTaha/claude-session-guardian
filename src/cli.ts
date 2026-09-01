@@ -440,6 +440,16 @@ function main(argv: string[]): number {
       out(`  commits:       ${m.observed.commits.length}\n`);
       out(`  checkpoint:    ${cp ? `${cp.kind}${cp.ref ? ` ${cp.ref}` : ''} — ${cp.detail}` : 'skipped'}\n`);
       out(`  manifest:      ${latestPath(projectDir)}\n`);
+      // Say it here, where the assumption is made. Sealing does not pause an agent — a
+      // subagent's state is its context, and nothing can freeze or restore that. What the
+      // manifest carries is which ones were still running and what redoing them costs.
+      const flying = m.agents.filter((a) => a.status === 'IN_FLIGHT_AT_SEAL');
+      if (flying.length) {
+        out(`\n  ${flying.length} agent(s) were still running and are NOT paused by this seal:\n`);
+        for (const a of flying) out(`    ${a.type} (${a.id}) — redo cost ${a.redo_cost_estimate}\n`);
+        out('  They keep going. The manifest records them so the next session knows what\n');
+        out('  may need redoing; let them finish if you can.\n');
+      }
       if (!m.claude_supplied.next_action) {
         out('\nNo next action recorded. Add one so the next session does not have to guess:\n');
         out('  guardian note --next "<the single most specific next step>"\n');

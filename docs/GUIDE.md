@@ -63,9 +63,12 @@ Note the third line. If you already had a status line, Guardian **keeps** it: it
 command on every tick and appends its own segment. Nothing you had is lost.
 
 ```
-🐝 hive · c3804 · 0f/0d  🛡 LAND ctx ▓▓▓▓▓░░░░░ 53% ⚠ ~21m  5h ▓▓▓▓▓▓▓▓▓░ 89% ⚠ ~3m
-└──────── the status line you had ─────────┘└──────── Guardian's segment ────────┘
+◤ graft · 318 nodes / 1161 edges  🐝 hive · c3804 · 0f/0d       ← the bar you had
+🛡 LAND ctx ▓▓▓▓▓░░░░░ 53% ⚠ ~21m  5h ▓▓▓▓▓▓▓▓▓░ 89% ⚠ ~3m     ← Guardian
 ```
+
+Guardian takes the line below by default, because two full bars on one row wrap in most
+terminals; `statusline.own_line: false` appends it to the same row instead.
 
 **Skipping the plugin is the common mistake.** Without its hooks nothing acts on its own:
 no seal before compaction, no spawn gate near a wall, no Stop brake, no 429 recovery. You
@@ -409,6 +412,19 @@ before Claude writes over it.
 
 ## Subagents near a wall
 
+**Sealing a handoff does not pause them.** This is the first thing to be clear about,
+because it is the natural assumption and it is wrong. A subagent's state *is* its context:
+there is no mechanism to freeze one, and none to restore it. `/guardian handoff` seals what
+the session knows; every agent in flight keeps running exactly as it was.
+
+What the seal does about them is record them. Each one still running is written to the
+manifest as `IN_FLIGHT_AT_SEAL` with an estimate of what redoing it would cost, the seal
+prints them so the assumption is corrected where it is made, and `doctor` warns while any
+remain. The next session then knows which work may be half-done rather than discovering it.
+
+Guardian's actual leverage over agents is earlier than the seal — at `PREPARE` it makes new
+ones self-checkpointing, and at `LAND` it refuses to start them at all.
+
 Fan-out is where a session loses the most work. A subagent's state **is** its context —
 there is no external handle on it, nothing to pause, nothing to resume. If the session dies
 at minute four of an eighteen-minute delegation, that delegation is simply gone.
@@ -417,13 +433,17 @@ Guardian does three things about it.
 
 ### It shows you what each agent is actually doing
 
-The agent panel rows are replaced with the two facts that inform a decision:
+The agent panel rows carry the task, then the facts that inform a decision about it:
 
 ```
-Explore · ctx 18% · 2m of ~5m (n=5)
-Build endpoint · ctx 91% · 2m of ~18m (n=3) · WARN ctx full ~1m
+Explore · map every call site of recordSample · ctx 18% · 2m of ~5m (n=5)
+Build endpoint · add POST /orders and its tests · ctx 91% · 2m of ~18m (n=3) · WARN ctx full ~1m
 ```
 
+- **The description** — what that agent was actually asked to do. Two agents of the same
+  type are otherwise indistinguishable, and "which of these do I let finish" is a question
+  about the work. On a narrow terminal this is the part that gets truncated, never the
+  meters: the context warning and the clock are what the decision is made on.
 - **`ctx 91%`** — how full that agent's own context window is.
 - **`2m of ~18m (n=3)`** — two minutes elapsed, against a **median of 3 past runs** of that
   agent type in this project. The `~` and the `n=` are deliberate: it is a measurement of
@@ -800,7 +820,9 @@ are equivalent.
     "manage": true,
     "chain_existing": true,
     "chained_command": null,
-    "chained_from": null
+    "chained_from": null,
+    "chain_timeout_ms": 5000,
+    "own_line": true
   },
   "render": { "bar_width": 10, "color": true }
 }
@@ -1172,7 +1194,7 @@ import upward", the dependency is inverted and the check will say so.
 npm run check         # typecheck + layers + build + stage-plugin + tests
 npm run layers        # just the architecture check
 npm run perf          # hot-path latency: sense() runs on every session event
-npm test              # 198 tests
+npm test              # 204 tests
 npm run stage-plugin  # build/plugin — the plugin payload, listed explicitly
 ```
 
