@@ -88,6 +88,12 @@ export function install(projectDir: string, settingsFile = userSettingsPath()): 
     // a timer keeps the reset clock and burn rate honest during those stretches.
     refreshInterval: 10,
   };
+  // Per-agent rows: context fill and pace, which is what informs a decision near a wall.
+  // Not chained — the default rendering is what it replaces, and there is nothing to keep.
+  settings.subagentStatusLine = {
+    type: 'command',
+    command: guardianCommand('sense-agents'),
+  };
   writeJson(settingsFile, settings);
 
   const cfg = loadConfig(projectDir);
@@ -112,11 +118,18 @@ export function uninstall(projectDir: string, settingsFile = userSettingsPath())
   const cfg = loadConfig(projectDir);
   const restore = cfg.statusline.chained_command;
 
+  const sub = settings.subagentStatusLine as { command?: string } | undefined;
+  let changed = false;
   if (typeof existing?.command === 'string' && existing.command.includes(MARKER)) {
     if (restore) settings.statusLine = { type: 'command', command: restore };
     else delete settings.statusLine;
-    writeJson(settingsFile, settings);
+    changed = true;
   }
+  if (typeof sub?.command === 'string' && sub.command.includes(MARKER)) {
+    delete settings.subagentStatusLine;
+    changed = true;
+  }
+  if (changed) writeJson(settingsFile, settings);
 
   writeJson(configPath(projectDir), {
     ...cfg,

@@ -3,9 +3,10 @@
 Sees every Claude Code exhaustion wall coming **with time-to-impact**, not just a percentage,
 and lands the session before it hits.
 
-> Status: **Phases 1–2 complete** — sensor and time-to-wall engine; observation ledger,
-> handoff manifest, lossless compaction, resume with workspace verification, git checkpoints.
-> Phases 3–5 (agent safety, landing protocol, `doctor`) are specified but not built.
+> Status: **Phases 1–3 complete** — sensor and time-to-wall engine; observation ledger,
+> handoff manifest, lossless compaction, resume with workspace verification, git checkpoints;
+> per-agent sensing, the spawn gate, and self-checkpointing subagents.
+> Phases 4–5 (landing protocol, `doctor`) are specified but not built.
 >
 > **[Full user guide with examples →](docs/GUIDE.md)**
 
@@ -59,6 +60,7 @@ sits on a blocking path:
 
 | Hook | Does |
 |---|---|
+| `PreToolUse` (sync) | denies subagent spawns near a wall; annotates them just before |
 | `PostToolUse` (async) | records files, commands, commits — secrets redacted |
 | `TaskCreated/Completed`, `SubagentStart/Stop` | task and agent ledgers, free |
 | `PreCompact` | seals a handoff before context goes lossy |
@@ -152,6 +154,35 @@ Read `wall` carefully — it is the whole point:
 Thresholds are minutes, configurable in `.claude/guardian/config.json`. Percentage floors
 remain as a fallback for when burn rate is not yet measurable.
 
+## Agent safety
+
+A subagent's state **is** its context — nothing can pause it, and nothing can resume it. So
+Guardian works on the only three levers that exist.
+
+**It measures.** `subagentStatusLine` supplies per-agent token counts, which become a live
+context-fill percentage and a token rate. Alongside them sits the median duration of past
+runs of that agent type in this project, labelled `≈` with its sample size — a measurement
+of history, never dressed up as a prediction about the run in front of you.
+
+```
+Explore · ctx 18% · 2m of ≈5m (n=5)
+Build endpoint · ctx 91% · 2m of ≈18m (n=3) · ⚠ ctx full ~1m
+```
+
+**It annotates.** At `PREPARE`, `PreToolUse` returns `updatedInput` and rewrites the agent's
+own prompt: write findings to disk as you go, prefer a partial answer to nothing. An agent
+cut off at minute four then leaves usable work behind. This is the honest substitute for
+pausing one.
+
+**It refuses.** At `LAND`, new spawns get `permissionDecision: "deny"` — deterministic, not
+a suggestion Claude can talk itself out of. The reason always names the config key that
+lifts it, because a block you cannot get past is a trap.
+
+Nothing else is ever blocked, at any mode. Irreversible shell work — migrations, deploys,
+`terraform apply` — is deliberately *recorded* rather than stopped: refusing to start a
+migration is sometimes right and sometimes leaves a system half-configured, and Guardian
+cannot tell which. If one starts and is never seen to return, the handoff leads with it.
+
 ## Design rules
 
 **Fail open.** A watchdog that breaks the session it watches is worse than no watchdog.
@@ -176,7 +207,7 @@ it holds prompts and paths and does not belong in a commit.
 ## Development
 
 ```bash
-npm run check      # typecheck + build + 99 tests
+npm run check      # typecheck + build + 133 tests
 ```
 
 `GUARDIAN_NOW=<epoch>` replays a session at its original timestamps, which is how the mode
@@ -196,4 +227,7 @@ src/ledger.ts   append-only observation log
 src/manifest.ts manifest build, seal, digest, verification
 src/git.ts      out-of-band checkpoint refs
 src/redact.ts   secret redaction for recorded commands
+src/agents.ts   per-agent sampling and historical durations
+src/senseAgents.ts  the subagentStatusLine sensor
+src/gate.ts     the spawn gate and boundary marking
 ```

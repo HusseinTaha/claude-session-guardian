@@ -5,6 +5,8 @@ import { loadConfig } from './config.ts';
 import { readState, writeState } from './state.ts';
 import { appendEvent, fileEvent, commandEvent, classifyCommand } from './ledger.ts';
 import { seal, hasUnconsumed, latestDigestPath, readLatest } from './manifest.ts';
+import { gateSpawn, markBoundary } from './gate.ts';
+import { readAgents, writeAgents, recordDuration } from './agents.ts';
 import { log } from './log.ts';
 
 /** Fields Guardian reads from a hook payload. Every hook receives the common set
@@ -107,6 +109,39 @@ function onPostToolUse(inp: HookInput, projectDir: string, sid: string, now: num
   return NOTHING;
 }
 
+const SPAWN_TOOLS = new Set(['Task', 'Agent']);
+
+/** The gate. Denies a spawn outright near a wall, and annotates one just before that.
+ *  Synchronous by necessity — a decision after the fact is not a decision. */
+function onPreToolUse(inp: HookInput, projectDir: string, sid: string, now: number): HookResult {
+  const tool = inp.tool_name ?? '';
+  const cfg = loadConfig(projectDir);
+  const state = readState(projectDir, sid);
+
+  const g = SPAWN_TOOLS.has(tool)
+    ? gateSpawn(inp.tool_input, state, cfg, projectDir, sid, now)
+    : tool === 'Bash' || tool === 'PowerShell'
+      ? markBoundary(inp.tool_input, cfg, projectDir, sid, now)
+      : { decision: null as null };
+
+  if (g.decision === 'deny') {
+    return ok({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: g.reason,
+      },
+    });
+  }
+  if (g.updatedInput) {
+    return ok({
+      hookSpecificOutput: { hookEventName: 'PreToolUse', updatedInput: g.updatedInput },
+      ...(g.systemMessage ? { systemMessage: g.systemMessage } : {}),
+    });
+  }
+  return NOTHING;
+}
+
 /** Compaction is the wall Guardian meets most often, and the cheapest to make survivable:
  *  seal on the way in, hand the digest back on the way out. */
 function onPreCompact(inp: HookInput, projectDir: string, sid: string, now: number): HookResult {
@@ -184,6 +219,22 @@ function onUserPromptSubmit(projectDir: string, sid: string, now: number): HookR
   });
 }
 
+/** Feed the historical-duration table, which is the only defensible basis Guardian has for
+ *  saying how long an agent of a given type is likely to take. Also drops the finished
+ *  agent's snapshot so the live count stays honest. */
+function recordAgentDuration(inp: HookInput, projectDir: string, sid: string, now: number): void {
+  const id = inp.agent_id;
+  const type = inp.agent_type;
+  if (!id) return;
+  const f = readAgents(projectDir, sid);
+  const snap = f.agents[id];
+  if (snap?.started_at && type) recordDuration(projectDir, type, now - snap.started_at);
+  if (snap) {
+    delete f.agents[id];
+    writeAgents(projectDir, { ...f, updated_at: now });
+  }
+}
+
 export function handle(event: string, raw: string, now = Date.now() / 1000): HookResult {
   let inp: HookInput = {};
   try {
@@ -199,6 +250,9 @@ export function handle(event: string, raw: string, now = Date.now() / 1000): Hoo
     if (!loadConfig(projectDir).enabled) return NOTHING;
 
     switch (event) {
+      case 'PreToolUse':
+        return onPreToolUse(inp, projectDir, sid, now);
+
       case 'PostToolUse':
         return onPostToolUse(inp, projectDir, sid, now);
 
@@ -218,6 +272,7 @@ export function handle(event: string, raw: string, now = Date.now() / 1000): Hoo
       case 'SubagentStart':
       case 'SubagentStop':
         if (inp.agent_id) {
+          if (event === 'SubagentStop') recordAgentDuration(inp, projectDir, sid, now);
           appendEvent(projectDir, sid, {
             k: 'agent',
             t: now,

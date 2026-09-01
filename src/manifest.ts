@@ -39,6 +39,8 @@ export interface Manifest {
     commands: Array<{ command: string; kind: string; ok: boolean | null; t: number }>;
     tests: { command: string; ok: boolean | null; at: number } | null;
     checkpoint: CheckpointResult | null;
+    /** Irreversible operations that began and were never seen to return. */
+    in_flight_at_seal: Array<{ command: string; started_at: number }>;
   };
   tasks: { completed: string[]; in_progress: string[] };
   agents: Array<{
@@ -77,6 +79,7 @@ export function buildManifest(
   const files = new Map<string, ManifestFile>();
   const commits: Array<{ sha: string; subject: string }> = [];
   const commands: Array<{ command: string; kind: string; ok: boolean | null; t: number }> = [];
+  const boundaries = new Map<string, number>();
   const tasksDone = new Set<string>();
   const tasksOpen = new Map<string, string>();
   const agents = new Map<string, Manifest['agents'][number]>();
@@ -93,6 +96,12 @@ export function buildManifest(
       case 'command':
         commands.push({ command: e.command, kind: e.kind, ok: e.ok, t: e.t });
         if (e.kind === 'test') tests = { command: e.command, ok: e.ok, at: e.t };
+        // PostToolUse only fires once a command returns, so seeing it here clears the
+        // matching boundary marker. Whatever is left began and never came back.
+        boundaries.delete(e.command);
+        break;
+      case 'boundary':
+        boundaries.set(e.command, e.t);
         break;
       case 'task':
         if (e.status === 'completed') {
@@ -156,6 +165,10 @@ export function buildManifest(
       commands: commands.slice(-25),
       tests,
       checkpoint: cp,
+      in_flight_at_seal: [...boundaries.entries()].map(([command, started_at]) => ({
+        command,
+        started_at,
+      })),
     },
     tasks: { completed: [...tasksDone], in_progress: [...tasksOpen.values()] },
     agents: [...agents.values()],
@@ -300,6 +313,17 @@ export function renderDigest(m: Manifest, projectDir: string): string {
   if (m.observed.commits.length) {
     L.push('## Commits this session');
     for (const c of m.observed.commits) L.push(`- \`${c.sha.slice(0, 8)}\` ${c.subject}`);
+    L.push('');
+  }
+
+  if (m.observed.in_flight_at_seal.length) {
+    // The most important thing a resuming session can be told: something irreversible may
+    // be half-done, and nothing on disk will necessarily reveal it.
+    L.push('## ⚠ Possibly interrupted mid-operation');
+    for (const b of m.observed.in_flight_at_seal) {
+      L.push(`- \`${b.command}\` started and was never seen to finish`);
+    }
+    L.push('Check the state of these before assuming the workspace is consistent.');
     L.push('');
   }
 

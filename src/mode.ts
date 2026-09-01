@@ -134,6 +134,12 @@ function ttwRank(st: AxisState): number {
   return st.time_to_wall_min === null ? Number.MAX_SAFE_INTEGER : st.time_to_wall_min;
 }
 
+/** Elapsed time, as opposed to a countdown: zero means "just started", not "now". */
+export function fmtElapsed(m: number): string {
+  if (!Number.isFinite(m) || m < 1) return '<1m';
+  return String(fmtMin(m));
+}
+
 export function fmtMin(m: number): number | string {
   if (!Number.isFinite(m)) return '∞';
   if (m <= 0) return 'now';

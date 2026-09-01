@@ -10,8 +10,30 @@ export const DEFAULT_CONFIG: GuardianConfig = {
   thresholds_percent_floor: { watch: 80, prepare: 90, land: 95, emergency: 97 },
   axes: { context: true, five_hour: true, seven_day: true, spend: true },
   axis_severity_cap: { context: 'LAND' },
+  agents: { deny_spawn_from: 'LAND', inject_checkpoint_prompt_from: 'PREPARE' },
+  // Recorded so a handoff can say one was in flight, never blocked: refusing to start a
+  // migration is sometimes right and sometimes leaves a system half-configured, and
+  // Guardian cannot tell which.
+  safe_boundary_commands: [
+    '*migrate*',
+    '*migration*',
+    '*deploy*',
+    'terraform *',
+    '*kubectl apply*',
+    '*helm upgrade*',
+    '*alembic*',
+    '*flyway*',
+    '*dotnet ef database*',
+  ],
   statusline: { manage: true, chain_existing: true, chained_command: null },
-  burn: { window_min: 10, min_span_s: 45, alpha: 0.35, max_samples: 60, reset_margin_min: 1 },
+  burn: {
+    window_min: 10,
+    min_span_s: 45,
+    alpha: 0.35,
+    max_samples: 60,
+    reset_margin_min: 1,
+    min_samples: 3,
+  },
   render: { bar_width: 10, color: true },
 };
 

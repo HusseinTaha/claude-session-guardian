@@ -73,6 +73,8 @@ export interface GuardianState {
   axes: Partial<Record<AxisName, AxisState>>;
   cost_usd: number | null;
   model: string | null;
+  /** Live subagent count and whether the gate is currently letting spawns through. */
+  agents: { live: number; spawn_allowed: boolean };
   /** Bounded ring of recent observations, oldest first. */
   samples: Sample[];
   /** Latches that must fire at most once per session. */
@@ -89,6 +91,14 @@ export interface GuardianConfig {
    *  auto-compaction: lossy and automatic, but recoverable in seconds. Treating it like a
    *  429 would cry wolf several times a day. */
   axis_severity_cap: Partial<Record<AxisName, Mode>>;
+  agents: {
+    /** Mode at which new subagent spawns are denied outright. */
+    deny_spawn_from: Mode;
+    /** Mode at which a spawned subagent's prompt gains a self-checkpointing note. */
+    inject_checkpoint_prompt_from: Mode;
+  };
+  /** Glob patterns for irreversible, long-running shell work. Recorded, never blocked. */
+  safe_boundary_commands: string[];
   statusline: { manage: boolean; chain_existing: boolean; chained_command: string | null };
   burn: {
     window_min: number;
@@ -97,6 +107,8 @@ export interface GuardianConfig {
     max_samples: number;
     /** Slack required before a refilling window counts as safe. */
     reset_margin_min: number;
+    /** Readings required before a rate is trusted. Two points can lie; three rarely do. */
+    min_samples: number;
   };
   render: { bar_width: number; color: boolean };
 }

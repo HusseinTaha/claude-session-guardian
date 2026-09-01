@@ -4,7 +4,8 @@ import { loadConfig } from './config.ts';
 import { resolveStateRoot } from './paths.ts';
 import { readState, writeState } from './state.ts';
 import { recordSample, rawBurnRate, smooth } from './burn.ts';
-import { axisMode, decide, timeToWall } from './mode.ts';
+import { axisMode, decide, timeToWall, severity } from './mode.ts';
+import { readAgents, liveCount } from './agents.ts';
 import { renderStatus } from './render.ts';
 import { log } from './log.ts';
 
@@ -57,6 +58,7 @@ export function computeState(
   payload: StatusLinePayload,
   cfg: GuardianConfig,
   now: number,
+  agentsLive = 0,
 ): GuardianState {
   const samples = recordSample(prev.samples, sampleFrom(payload, now), cfg);
   const latest = samples[samples.length - 1];
@@ -102,17 +104,23 @@ export function computeState(
     prev.mode === 'HARD_STOPPED' &&
     Object.values(axes).some((a) => a?.resets_at != null && a.resets_at > now);
 
+  const mode = stillStopped ? 'HARD_STOPPED' : d.mode;
+
   return {
     ...prev,
     schema: 1,
     updated_at: now,
-    mode: stillStopped ? 'HARD_STOPPED' : d.mode,
+    mode,
     reason: stillStopped ? prev.reason : d.reason,
     binding_axis: stillStopped ? prev.binding_axis : d.binding_axis,
     axes,
     samples,
     cost_usd: pct(payload.cost?.total_cost_usd) ?? prev.cost_usd,
     model: payload.model?.display_name ?? prev.model,
+    agents: {
+      live: agentsLive,
+      spawn_allowed: severity(mode) < severity(cfg.agents.deny_spawn_from),
+    },
   };
 }
 
@@ -154,7 +162,8 @@ export function sense(raw: string, now = Date.now() / 1000): string {
   let line = '';
   try {
     const sessionId = payload.session_id || 'unknown';
-    const next = computeState(readState(projectDir, sessionId), payload, cfg, now);
+    const live = liveCount(readAgents(projectDir, sessionId), now);
+    const next = computeState(readState(projectDir, sessionId), payload, cfg, now, live);
     writeState(projectDir, next);
     line = renderStatus(next, cfg);
   } catch (err) {

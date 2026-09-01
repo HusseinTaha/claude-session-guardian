@@ -43,7 +43,10 @@ export function rawBurnRate(
 
   const windowStart = now - cfg.burn.window_min * 60;
   const recent = pts.slice(start).filter((p) => p.t >= windowStart);
-  if (recent.length < 2) return null;
+  // Two readings are enough to compute a slope and not enough to believe one. A single
+  // anomalous percentage — a fan-out landing all at once, a window rolling over — would
+  // otherwise produce an absurd rate that slams the mode ladder to EMERGENCY on the spot.
+  if (recent.length < Math.max(2, cfg.burn.min_samples)) return null;
 
   const first = recent[0]!;
   const last = recent[recent.length - 1]!;

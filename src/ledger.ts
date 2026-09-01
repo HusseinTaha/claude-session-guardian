@@ -16,6 +16,7 @@ export type LedgerEvent =
   | { k: 'task'; t: number; id: string; title: string; status: 'created' | 'completed' }
   | { k: 'agent'; t: number; id: string; type: string; status: 'start' | 'stop'; summary?: string }
   | { k: 'note'; t: number; field: NoteField; text: string }
+  | { k: 'boundary'; t: number; command: string }
   | { k: 'seal'; t: number; reason: string };
 
 export type CommandKind = 'test' | 'build' | 'git' | 'other';

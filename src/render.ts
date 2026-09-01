@@ -88,6 +88,8 @@ export function renderDashboard(state: GuardianState, cfg: GuardianConfig): stri
     );
   }
   rows.push(pad(''));
+  const gate = state.agents.spawn_allowed ? 'allowed' : 'BLOCKED';
+  rows.push(pad(`Agents:   ${state.agents.live} live, new spawns ${gate}`));
   rows.push(pad(`Samples:  ${state.samples.length}`));
   rows.push(
     pad(`Manifest: ${state.manifest.sealed_at ? new Date(state.manifest.sealed_at * 1000).toISOString() : 'not sealed'}`),

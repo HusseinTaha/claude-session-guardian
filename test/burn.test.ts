@@ -73,3 +73,26 @@ test('smooth blends toward the new estimate and survives missing readings', () =
   assert.equal(smooth(4, null, 0.35), 4); // first estimate: adopt it
   assert.ok(Math.abs(smooth(4, 2, 0.5)! - 3) < 1e-9);
 });
+
+test('a rate is not trusted until enough readings agree on it', () => {
+  // Two points can lie: one anomalous reading would otherwise imply an absurd rate and
+  // slam the mode ladder straight to EMERGENCY.
+  const twoPoints: Sample[] = [
+    { t: T0, five_hour: 40 },
+    { t: T0 + 60, five_hour: 91 },
+  ];
+  assert.equal(rawBurnRate(twoPoints, 'five_hour', cfg, T0 + 60), null);
+
+  // A third consistent reading makes it believable.
+  const three = [...twoPoints, { t: T0 + 120, five_hour: 142 }];
+  assert.ok(rawBurnRate(three, 'five_hour', cfg, T0 + 120) !== null);
+});
+
+test('min_samples is configurable for anyone who wants the twitchier behaviour', () => {
+  const twitchy = { ...cfg, burn: { ...cfg.burn, min_samples: 2 } };
+  const twoPoints: Sample[] = [
+    { t: T0, five_hour: 50 },
+    { t: T0 + 60, five_hour: 52 },
+  ];
+  assert.ok(Math.abs(rawBurnRate(twoPoints, 'five_hour', twitchy, T0 + 60)! - 2) < 0.01);
+});

@@ -10,6 +10,7 @@ close, it seals a handoff so the next session can pick the work up exactly where
 - [A day with Guardian](#a-day-with-guardian)
 - [Compaction](#compaction)
 - [Handing off and resuming](#handing-off-and-resuming)
+- [Subagents near a wall](#subagents-near-a-wall)
 - [Recording what cannot be observed](#recording-what-cannot-be-observed)
 - [Git checkpoints](#git-checkpoints)
 - [Configuration](#configuration)
@@ -314,6 +315,115 @@ before Claude writes over it.
 
 ---
 
+## Subagents near a wall
+
+Fan-out is where a session loses the most work. A subagent's state **is** its context —
+there is no external handle on it, nothing to pause, nothing to resume. If the session dies
+at minute four of an eighteen-minute delegation, that delegation is simply gone.
+
+Guardian does three things about it.
+
+### It shows you what each agent is actually doing
+
+The agent panel rows are replaced with the two facts that inform a decision:
+
+```
+Explore · ctx 18% · 2m of ~5m (n=5)
+Build endpoint · ctx 91% · 2m of ~18m (n=3) · WARN ctx full ~1m
+```
+
+- **`ctx 91%`** — how full that agent's own context window is.
+- **`2m of ~18m (n=3)`** — two minutes elapsed, against a **median of 3 past runs** of that
+  agent type in this project. The `~` and the `n=` are deliberate: it is a measurement of
+  history, not a prediction about this run. Guardian cannot know how much work an agent has
+  left, and does not pretend to.
+- **`ctx full ~1m`** — this one *is* a projection, and a sound one: tokens remaining divided
+  by the measured token rate.
+
+History accumulates across sessions:
+
+```
+$ claude-guardian agents
+Explore                  18% ctx      2100 tok/min
+
+Historical duration by agent type:
+  Explore                  median 5m (n=5)
+  general-purpose          median 18m (n=3)
+```
+
+That table is what makes "will this delegation fit in my remaining budget?" answerable.
+
+### At PREPARE, it makes new agents self-checkpointing
+
+The spawn still goes through, but Guardian rewrites the agent's prompt on the way past:
+
+```
+Research how payments are wired through the service layer.
+---
+Budget note from Session Guardian: this session is at PREPARE: about 11m of
+five_hour budget left.
+Work so that being cut off early still leaves something useful:
+- Write findings to `.claude/guardian/agent-notes/payment-research.md` as you go,
+  rather than only at the end.
+- Prefer returning a partial answer over returning nothing.
+- Do not start work you cannot bring to a reportable state quickly.
+```
+
+You see one line: `Guardian asked this agent to checkpoint as it goes (PREPARE).`
+
+This is the honest substitute for pausing an agent. You cannot freeze one, but you can make
+it leave a trail from the moment it is born.
+
+### At LAND, it refuses the spawn
+
+This is the one place Guardian actually says no, and it is a hard `deny` — not a suggestion
+Claude may talk itself out of:
+
+```
+Session Guardian is in LAND — 5-hour: 96% used, ~4m to wall, resets in 3.6h. New
+subagents are blocked because a delegated task cannot be checkpointed or resumed
+once the session stops. 2 agent(s) already running; let them return. Finish or
+seal the current work instead (`/guardian handoff`), or do the task inline where
+its partial results stay in this session. To override, raise
+agents.deny_spawn_from in .claude/guardian/config.json.
+```
+
+Note the last sentence. A block you cannot get past is a trap, so the reason always names
+the setting that lifts it:
+
+```json
+{ "agents": { "deny_spawn_from": "EMERGENCY" } }
+{ "agents": { "deny_spawn_from": "HARD_STOPPED" } }
+{ "agents": { "deny_spawn_from": "PREPARE" } }
+```
+
+Those are, in order: later, effectively never, and earlier.
+
+Nothing else is ever blocked. Edits, reads, searches and shell commands pass through
+untouched at every mode, including `EMERGENCY`.
+
+### Irreversible operations are recorded, never blocked
+
+Migrations, deploys and `terraform apply` are matched separately:
+
+```json
+{ "safe_boundary_commands": ["*migrate*", "*deploy*", "terraform *", "*kubectl apply*"] }
+```
+
+Guardian **does not** stop these near a wall. Refusing to start a migration is sometimes
+right and sometimes leaves a system half-configured, and Guardian cannot tell which. What it
+does instead is note that one began. If the command never returns — because the session died
+mid-flight — the handoff leads with it:
+
+```markdown
+## Possibly interrupted mid-operation
+- `terraform apply -auto-approve` started and was never seen to finish
+Check the state of these before assuming the workspace is consistent.
+```
+
+That is the single most valuable thing a resuming session can be told, because nothing on
+disk necessarily reveals it.
+
 ## Recording what cannot be observed
 
 Guardian sees files, commands, commits, tasks and agents. It cannot see *why*. Four fields
@@ -396,12 +506,19 @@ in the manifest.
   "axes": { "context": true, "five_hour": true, "seven_day": true, "spend": true },
   "axis_severity_cap": { "context": "LAND" },
 
+  "agents": {
+    "deny_spawn_from": "LAND",
+    "inject_checkpoint_prompt_from": "PREPARE"
+  },
+  "safe_boundary_commands": ["*migrate*", "*deploy*", "terraform *", "*kubectl apply*"],
+
   "burn": {
     "window_min": 10,
     "min_span_s": 45,
     "alpha": 0.35,
     "max_samples": 60,
-    "reset_margin_min": 1
+    "reset_margin_min": 1,
+    "min_samples": 3
   },
 
   "statusline": { "manage": true, "chain_existing": true, "chained_command": null },
@@ -418,6 +535,10 @@ in the manifest.
 | `burn.window_min` | Longer is steadier, slower to notice a sudden fan-out. |
 | `burn.alpha` | Higher reacts faster and is twitchier. |
 | `burn.reset_margin_min` | Slack required before a refilling window counts as safe. Raise it if you distrust the estimate. |
+| `burn.min_samples` | Readings required before a rate is believed. Two points can lie — one anomalous percentage would otherwise imply an absurd rate. |
+| `agents.deny_spawn_from` | Mode at which new subagents are refused. `HARD_STOPPED` disables the gate. |
+| `agents.inject_checkpoint_prompt_from` | Mode at which spawned agents get the self-checkpointing note. |
+| `safe_boundary_commands` | Irreversible work to record as possibly-interrupted. Never blocked. |
 | `render.color` | Set `false` for a terminal that mangles ANSI. |
 | `enabled` | `false` makes Guardian completely silent while leaving it installed. |
 
@@ -439,10 +560,11 @@ echo '{ "enabled": false }' > .claude/guardian/config.json
 | `/guardian verify` | Check the manifest against the workspace without consuming it |
 | `/guardian install` / `uninstall` | Set up or remove the status line |
 | `claude-guardian note --objective\|--next\|--decision\|--gotcha <text>` | Record intent |
+| `claude-guardian agents` | Live subagents, plus historical duration by agent type |
 | `claude-guardian checkpoints` | List git checkpoint refs |
 | `claude-guardian where` | Print the command `install` configures |
 
-`sense` and `hook <Event>` are internal; Claude Code invokes them.
+`sense`, `sense-agents` and `hook <Event>` are internal; Claude Code invokes them.
 
 ### Where things live
 
@@ -450,8 +572,11 @@ echo '{ "enabled": false }' > .claude/guardian/config.json
 .claude/guardian/
 ├── config.json                       your settings
 ├── .gitignore                        contains "*" — this tree never enters a commit
+├── agent-stats.json                  historical durations by agent type
+├── agent-notes/                      incremental notes agents write for themselves
 ├── sessions/
 │   ├── <session>.json                the gauge: percentages, burn rates, mode
+│   ├── <session>.agents.json         live subagents and their token pace
 │   └── <session>.ledger.jsonl        append-only observations
 ├── handoff/
 │   ├── latest.json                   the manifest
@@ -486,6 +611,15 @@ The sensor has not run in this directory. Check you are in the project root — 
 walks up for `.claude/guardian` or `.git` to find one root, and never treats your home
 directory as a project.
 
+**A subagent spawn was refused and I wanted it.**
+Guardian is at `LAND` or above. Raise `agents.deny_spawn_from` in
+`.claude/guardian/config.json` (to `EMERGENCY`, or `HARD_STOPPED` to disable the gate), or
+seal a handoff and continue in a fresh session.
+
+**Agent rows show elapsed time with no median to compare against.**
+No agent of that type has completed in this project yet, so there is no history. It appears
+after the first one finishes.
+
 **A checkpoint says `status-only`.**
 Not a git repository, or git plumbing failed. The manifest still carries file hashes; only
 the recoverable commit is missing. `detail` in the manifest says which.
@@ -504,19 +638,21 @@ Being clear about this saves disappointment.
 earliest Guardian can inject anything is the next tool call. In practice that is seconds,
 but nothing here preempts a running operation.
 
-**It cannot pause or checkpoint a running subagent.** A subagent's state *is* its context;
-there is no external handle on it. Guardian records what agents ran and what they returned.
-Making fan-out safe near a wall — blocking new spawns, and having agents write findings as
-they go — is Phase 3 and not built yet.
+**It still cannot pause a running subagent.** A subagent's state *is* its context; there is
+no external handle on it. What Guardian does instead is refuse *new* spawns near a wall and
+make the ones it does allow self-checkpointing from birth. An agent already in flight when
+the session dies is still lost — Guardian records that it was running, and nothing more.
 
 **It does not save the conversation.** That is the wrong abstraction. Guardian persists the
 *work*: files and their hashes, commits, checkpoints, tasks, tests, and stated intent. A
 fresh session rebuilds understanding from those, which is more reliable than trying to
 freeze a context window.
 
-**It does not stop you.** Nothing here refuses a tool call yet. Guardian tells you the
-truth about your remaining budget and makes the aftermath survivable; the decisions stay
-yours. Deterministic enforcement arrives in Phase 3/4.
+**It stops exactly one thing.** New subagent spawns, at `LAND` and above, and only because
+a delegation is the one action whose partial results cannot be recovered. Everything else —
+edits, reads, searches, shell commands, migrations — passes through untouched at every mode.
+Guardian tells you the truth about your budget and makes the aftermath survivable; the rest
+of the decisions stay yours.
 
 **It cannot see account usage your plan does not report.** There is exactly one live feed
 for rate limits, and if your plan omits it, Guardian says `unknown` rather than guessing.

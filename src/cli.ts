@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { sense } from './sense.ts';
+import { senseAgents } from './senseAgents.ts';
 import { install, uninstall, guardianCommand } from './install.ts';
 import { loadConfig } from './config.ts';
 import { readState } from './state.ts';
@@ -17,6 +18,8 @@ import {
   latestPath,
 } from './manifest.ts';
 import { removeCheckpoints, listCheckpoints } from './git.ts';
+import { readAgents, typeStats } from './agents.ts';
+import { fmtMin } from './mode.ts';
 
 function readStdin(): string {
   try {
@@ -39,7 +42,8 @@ function now(): number {
  *  files alone sent `note` to a phantom session, so the objective and next action never
  *  reached the sealed manifest. */
 function latestSession(projectDir: string): string | null {
-  const SUFFIXES = ['.ledger.jsonl', '.json'];
+  // Longest first: `s1.agents.json` must not be read as a session named `s1.agents`.
+  const SUFFIXES = ['.ledger.jsonl', '.agents.json', '.json'];
   try {
     const dir = join(stateDir(projectDir), 'sessions');
     const seen = new Map<string, number>();
@@ -67,6 +71,7 @@ const USAGE = `claude-guardian <command>
 Sensor and status
   sense                    statusLine sensor: reads the payload on stdin, updates
                            state, prints the status segment
+  sense-agents             subagentStatusLine sensor: per-agent context and pace
   status                   render the dashboard for this project's latest session
 
 Handoff
@@ -86,6 +91,7 @@ Setup
 
 Internal
   hook <EventName>         hook dispatch; reads the event payload on stdin
+  agents                   show live subagents and historical durations by type
 `;
 
 const NOTE_FLAGS: Array<[string, NoteField]> = [
@@ -151,6 +157,10 @@ function main(argv: string[]): number {
   switch (cmd) {
     case 'sense':
       out(sense(readStdin(), now()));
+      return 0;
+
+    case 'sense-agents':
+      out(senseAgents(readStdin(), now()));
       return 0;
 
     case 'hook': {
@@ -254,6 +264,32 @@ function main(argv: string[]): number {
       const refs = listCheckpoints(projectDir);
       if (!refs.length) out('No Guardian checkpoints in this repository.\n');
       for (const r of refs) out(`${r}\n`);
+      return 0;
+    }
+
+    case 'agents': {
+      const sid = latestSession(projectDir);
+      const f = sid ? readAgents(projectDir, sid) : null;
+      const live = f ? Object.values(f.agents) : [];
+      if (!live.length) out('No live subagents recorded.\n');
+      for (const a of live) {
+        const ctx =
+          a.context_window && a.token_count !== null
+            ? `${((a.token_count / a.context_window) * 100).toFixed(0)}% ctx`
+            : 'ctx unknown';
+        const pace = a.tokens_per_min ? `${a.tokens_per_min.toFixed(0)} tok/min` : 'pace unknown';
+        out(`${(a.name ?? a.type ?? a.id).padEnd(24)} ${ctx.padEnd(12)} ${pace}\n`);
+      }
+      const stats = typeStats(projectDir);
+      const entries = Object.entries(stats);
+      if (entries.length) {
+        out('\nHistorical duration by agent type:\n');
+        for (const [type, st] of entries) {
+          out(`  ${type.padEnd(24)} median ${fmtMin(st.median_s / 60)} (n=${st.count})\n`);
+        }
+      } else {
+        out('\nNo completed agents recorded yet, so no duration history.\n');
+      }
       return 0;
     }
 
