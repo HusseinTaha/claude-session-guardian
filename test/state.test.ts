@@ -139,6 +139,25 @@ test('init wires whichever settings file actually decides the status line', () =
   const again = init(dir, join(dir, 'user-settings.json'));
   assert.equal(again.alreadySensing, true);
   assert.equal(loadConfig(dir).statusline.chained_command, 'repo-bar.cjs');
+  // And it still knows WHERE that command lives. Once Guardian owns the top layer, the
+  // deciding file is Guardian's own; reading chained_from off that left it null on every
+  // re-run, so Guardian ran a snapshot forever while doctor advised running this.
+  assert.ok(loadConfig(dir).statusline.chained_from?.endsWith(join('.claude', 'settings.json')));
+  assert.ok(again.displaced.endsWith(join('.claude', 'settings.json')), again.displaced);
+});
+
+test('init re-reads a chained command that changed under it', () => {
+  const dir = tmp();
+  const projSettings = join(dir, '.claude', 'settings.json');
+  mkdirSync(dirname(projSettings), { recursive: true });
+  writeFileSync(projSettings, JSON.stringify({ statusLine: { type: 'command', command: 'bar-v1.cjs' } }));
+  init(dir, join(dir, 'user-settings.json'));
+
+  // The tool that owns that bar rewrites it; hive does exactly this.
+  writeFileSync(projSettings, JSON.stringify({ statusLine: { type: 'command', command: 'bar-v2.cjs' } }));
+  const r = init(dir, join(dir, 'user-settings.json'));
+  assert.equal(r.chained, 'bar-v2.cjs');
+  assert.equal(loadConfig(dir).statusline.chained_command, 'bar-v2.cjs');
 });
 
 test('uninstall removes an override layer rather than copying the repo bar into it', () => {

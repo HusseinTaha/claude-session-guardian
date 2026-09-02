@@ -1,8 +1,9 @@
-import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
+import { readFileSync, writeFileSync, renameSync, openSync, closeSync, unlinkSync } from 'node:fs';
 import { AXES, type AxisName, type AxisState, type GuardianConfig, type GuardianState, type Sample, type StatusLinePayload } from '../types.ts';
 import { loadConfig } from '../core/config.ts';
-import { resolveStateRoot } from '../core/paths.ts';
+import { join, dirname } from 'node:path';
+import { resolveStateRoot, stateDir, ensureGuardianDir } from '../core/paths.ts';
 import { readState, writeState } from '../core/state.ts';
 import { recordSample, rawBurnRate, smooth } from '../budget/burn.ts';
 import { axisMode, decide, timeToWall, severity } from '../budget/mode.ts';
@@ -142,6 +143,108 @@ export function expandVars(cmd: string, env: Record<string, string | undefined>)
     .replace(/\$(\w+)/g, (m, name: string) => env[name] ?? m);
 }
 
+/** Run the chained command with the payload on a file descriptor instead of a pipe.
+ *
+ *  `spawnSync`'s timeout kills the shell it started, not the grandchild that shell started,
+ *  and while Node holds a stdin pipe open for that grandchild the call goes on waiting for
+ *  it. Measured on Windows against a child that runs for 3s: a 300ms cap returned after
+ *  3139ms with `input`, and after 309ms with stdin on a descriptor. So the cap was not a
+ *  cap — a slow bar held the status line for however long it actually took, which is what
+ *  made the whole line above Guardian disappear while a dozen agents were running rather
+ *  than just the chained segment.
+ *
+ *  Same payload, same contract: the command still reads its JSON from stdin. */
+function spawnChained(
+  cmd: string,
+  stdin: string,
+  projectDir: string,
+  cfg: GuardianConfig,
+  env: Record<string, string | undefined>,
+): SpawnSyncReturns<string> {
+  const base = {
+    shell: true,
+    encoding: 'utf8' as const,
+    timeout: Math.max(100, cfg.statusline.chain_timeout_ms),
+    windowsHide: true,
+    env,
+  };
+  const p = join(stateDir(projectDir), `chain-stdin.${process.pid}.json`);
+  let fd: number | null = null;
+  try {
+    ensureGuardianDir(projectDir, dirname(p));
+    writeFileSync(p, stdin);
+    fd = openSync(p, 'r');
+    return spawnSync(cmd, { ...base, stdio: [fd, 'pipe', 'pipe'] });
+  } catch {
+    // Nowhere to put the payload: the pipe still delivers it, the cap just cannot be
+    // trusted. A bar that runs is worth more than one that is punctual.
+    return spawnSync(cmd, { ...base, input: stdin });
+  } finally {
+    if (fd !== null) {
+      try {
+        closeSync(fd);
+      } catch {
+        /* ignore */
+      }
+    }
+    try {
+      unlinkSync(p);
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/** Where the last bar the chained command actually produced is kept. */
+function chainedCachePath(projectDir: string): string {
+  return join(stateDir(projectDir), 'chained-bar.txt');
+}
+
+/** How old a kept bar may be before dots are the honest answer.
+ *
+ *  A constant, not a knob. The question it settles is not a preference: below this the
+ *  segment is the user's own bar a few ticks late, and above it the counts in it have
+ *  probably moved enough to mislead. */
+const CHAINED_CACHE_MAX_AGE_S = 600;
+
+export interface ChainedResult {
+  text: string;
+  /** `fresh` ran and produced this; `cached` is the last bar it produced, reused because
+   *  this run failed; `none` means there was nothing to show. */
+  source: 'fresh' | 'cached' | 'none';
+  /** Seconds since the cached bar was produced. Only set for `cached`. */
+  age_s?: number;
+}
+
+function keepChained(projectDir: string, text: string, now: number): void {
+  try {
+    const p = chainedCachePath(projectDir);
+    ensureGuardianDir(projectDir, dirname(p));
+    // Written whole. A tick that read a half-written cache would put a torn escape sequence
+    // on the bar, and the bar is the one surface nobody can debug from.
+    const tmp = `${p}.${process.pid}.tmp`;
+    writeFileSync(tmp, `${Math.floor(now)}\n${text}`);
+    renameSync(tmp, p);
+  } catch {
+    /* a cache that cannot be written costs a fallback, never a tick */
+  }
+}
+
+function lastChained(projectDir: string, now: number): { text: string; age_s: number } | null {
+  try {
+    const raw = readFileSync(chainedCachePath(projectDir), 'utf8');
+    const nl = raw.indexOf('\n');
+    if (nl < 0) return null;
+    const t = Number(raw.slice(0, nl));
+    const text = raw.slice(nl + 1);
+    if (!Number.isFinite(t) || !text.trim()) return null;
+    const age = Math.max(0, now - t);
+    return age <= CHAINED_CACHE_MAX_AGE_S ? { text, age_s: age } : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Run the status line command Guardian displaced, so installing Guardian never costs the
  *  user the status line they already had.
  *
@@ -150,35 +253,55 @@ export function expandVars(cmd: string, env: Record<string, string | undefined>)
  *  repository, and the only visible effect was two tools disappearing from the line with
  *  no error anywhere. Whatever that command costs, it cost the same before Guardian was
  *  in front of it. */
-function runChained(cmd: string, stdin: string, projectDir: string, cfg: GuardianConfig): string {
+function runChained(
+  cmd: string,
+  stdin: string,
+  projectDir: string,
+  cfg: GuardianConfig,
+  now: number,
+): ChainedResult {
   try {
     // Claude Code sets this for the command it launches; the chained one is launched by
     // Guardian instead, so it has to be supplied here or the child sees nothing.
     const env = { ...process.env, CLAUDE_PROJECT_DIR: projectDir };
-    const r = spawnSync(expandVars(cmd, env), {
-      input: stdin,
-      shell: true,
-      encoding: 'utf8',
-      timeout: Math.max(100, cfg.statusline.chain_timeout_ms),
-      windowsHide: true,
-      env,
-    });
+    const r = spawnChained(expandVars(cmd, env), stdin, projectDir, cfg, env);
     const text = (r.stdout ?? '').trim();
-    if (text) return text;
+    if (text) {
+      keepChained(projectDir, text, now);
+      return { text, source: 'fresh' };
+    }
     // Killed by the timeout, or died. Say so somewhere: a bar that quietly loses a segment
     // is indistinguishable from a bar whose other tool decided it had nothing to report.
     if (r.signal || r.error || r.status !== 0) {
+      const why = r.signal
+        ? `killed after ${cfg.statusline.chain_timeout_ms}ms`
+        : (r.error?.message ?? `exit ${r.status}`);
+      // A bar that took 700ms on a quiet machine takes longer than the cap while a dozen
+      // agents run, which is exactly when the user is watching it. Replacing their whole
+      // segment with three dots at that moment loses real information for no gain — the
+      // last bar it produced is still broadly true, so show that and mark it as late.
+      const kept = lastChained(projectDir, now);
       log(
         projectDir,
         'warn',
-        `chained status line produced nothing (${r.signal ? `killed after ${cfg.statusline.chain_timeout_ms}ms` : (r.error?.message ?? `exit ${r.status}`)}): ${cmd}`,
+        `chained status line produced nothing (${why}): ${cmd}` +
+          (kept ? ` — showing the bar from ${Math.round(kept.age_s)}s ago` : ''),
       );
-      return r.signal ? '⋯' : '';
+      if (kept) return { text: kept.text, source: 'cached', age_s: kept.age_s };
+      return { text: r.signal ? '⋯' : '', source: 'none' };
     }
-    return '';
+    return { text: '', source: 'none' };
   } catch {
-    return '';
+    return { text: '', source: 'none' };
   }
+}
+
+/** The mark on a bar that is being reused. The dots stay — something did fail — but they
+ *  ride beside the segment instead of replacing it, and they carry its age. */
+function lateMark(age_s: number, color: boolean): string {
+  const age = age_s < 60 ? '' : `${Math.round(age_s / 60)}m`;
+  const mark = `⋯${age}`;
+  return color ? `\x1b[2m${mark}\x1b[0m` : mark;
 }
 
 /** Run the chained command once, the way a tick does, and say whether anything came back.
@@ -189,12 +312,15 @@ function runChained(cmd: string, stdin: string, projectDir: string, cfg: Guardia
 export function probeChained(
   projectDir: string,
   cfg: GuardianConfig,
+  now = Date.now() / 1000,
 ): { cmd: string | null; ok: boolean } {
   const cmd = liveChainedCommand(cfg, projectDir);
   if (!cmd) return { cmd: null, ok: true };
   const payload = JSON.stringify({ session_id: 'guardian-doctor', cwd: projectDir });
-  const text = runChained(cmd, payload, projectDir, cfg);
-  return { cmd, ok: text !== '' && text !== '⋯' };
+  // Only a run that produced a bar counts. Reusing the kept one keeps the display honest;
+  // letting it answer the probe would have doctor report a command that never runs as one
+  // that does — the gauge agreeing with the cache instead of with the world.
+  return { cmd, ok: runChained(cmd, payload, projectDir, cfg, now).source === 'fresh' };
 }
 
 /** The command to chain, preferring what its source file says *now* over what it said when
@@ -237,7 +363,13 @@ export function sense(raw: string, now = Date.now() / 1000): string {
   const projectDir = resolveProjectDir(payload);
   const cfg = loadConfig(projectDir);
   const toChain = liveChainedCommand(cfg, projectDir);
-  const chained = toChain ? runChained(toChain, raw, projectDir, cfg) : '';
+  const run: ChainedResult = toChain
+    ? runChained(toChain, raw, projectDir, cfg, now)
+    : { text: '', source: 'none' };
+  const chained =
+    run.source === 'cached'
+      ? `${run.text} ${lateMark(run.age_s ?? 0, cfg.render.color)}`
+      : run.text;
 
   if (!cfg.enabled) return chained;
 

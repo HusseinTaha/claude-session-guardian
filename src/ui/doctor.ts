@@ -118,7 +118,7 @@ export function audit(
                 name: 'chained bar',
                 status: 'warn',
                 detail: `runs here, but was dropped ${failures} time(s) in the last 6h of real ticks`,
-                fix: 'see `guardian log`; the segment is missing from the bar whenever that happens',
+                fix: 'the last bar it produced is shown instead, marked `⋯`; `guardian log` has each drop, and `statusline.chain_timeout_ms` is the cap it exceeded',
               }
             : {
               name: 'chained bar',

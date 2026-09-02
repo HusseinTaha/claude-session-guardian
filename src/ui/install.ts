@@ -140,18 +140,29 @@ export function init(startDir: string, userSettings = userSettingsPath()): InitR
   const chain = settingsChain(projectDir, userSettings);
 
   // Highest precedence file that defines a status line at all; the user's if none does.
+  // Tracked separately from the highest-precedence file that defines a status line which is
+  // NOT Guardian's: once Guardian owns the top layer, that is the only place the chained
+  // command can still be read from. Looking only at the deciding file left `chained_from`
+  // null on every re-run — and `doctor` then advised `guardian init` to fix a thing that
+  // `init` could not fix, which is worse than saying nothing.
   let settingsFile = chain[0]!;
   let existingCmd: string | null = null;
+  let chainedFrom: string | null = null;
+  let chainedCmd: string | null = null;
   for (const file of chain) {
     const cmd = (readJson(file).statusLine as { command?: string } | undefined)?.command;
     if (typeof cmd === 'string') {
       settingsFile = file;
       existingCmd = cmd;
+      if (!cmd.includes(MARKER)) {
+        chainedFrom = file;
+        chainedCmd = cmd;
+      }
     }
   }
 
   const alreadySensing = !!existingCmd?.includes(MARKER);
-  const chained = existingCmd && !alreadySensing ? existingCmd : null;
+  const chained = chainedCmd;
 
   // Where to write is not the same question as who currently decides. `.claude/settings.json`
   // is usually committed, and Guardian's command carries an absolute path to one machine's
@@ -184,12 +195,16 @@ export function init(startDir: string, userSettings = userSettingsPath()): InitR
       // Remember where it came from, not just what it said. Tools that manage their own
       // status line rewrite it — hive does — and a snapshot taken at init would keep
       // running last month's command while the tool's updates went nowhere.
-      chained_from: chained ? settingsFile : cfg.statusline.chained_from,
+      chained_from: chainedFrom ?? cfg.statusline.chained_from,
     },
   });
 
   const scope: InitResult['scope'] = target === chain[0] ? 'user' : 'project-local';
-  return { projectDir, settingsFile: target, displaced: settingsFile, scope, chained, alreadySensing };
+  // What Guardian is layered over: the file that would decide if Guardian were not there,
+  // which is never Guardian's own file. Saying "overriding settings.local.json" while
+  // writing settings.local.json described nothing.
+  const displaced = chainedFrom ?? settingsFile;
+  return { projectDir, settingsFile: target, displaced, scope, chained, alreadySensing };
 }
 
 /** The settings file that currently points at Guardian, highest precedence first, so an

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.7.1
+
+The status line, under the load it was built for.
+
+- **The chained bar's timeout capped nothing.** `spawnSync`'s `timeout` kills the shell it
+  started, not the grandchild that shell started, and while Node holds a stdin pipe for that
+  grandchild the call keeps waiting: a 300ms cap against a 3s child returned after 3139ms.
+  So a slow bar blocked the whole status line for as long as it really took — worst while a
+  dozen agents ran, which is when it was noticed. The payload now reaches the child on a file
+  descriptor, and the cap holds (309ms for the same case).
+- **A dropped segment degrades instead of vanishing.** When the chained command fails or is
+  killed, Guardian shows the last bar it produced, marked `⋯` with its age, for up to ten
+  minutes — rather than replacing the user's whole segment with three dots. The mark stays,
+  because something did fail, and `doctor`'s probe still answers for the command rather than
+  for the cache.
+- **`guardian init` re-reads a chained command it had already displaced.** It took the
+  command from the file that *decides* the status line, which is Guardian's own once Guardian
+  is installed — so `chained_from` stayed null on every re-run, Guardian ran a months-old
+  snapshot of that bar, and `doctor` advised running `init` to fix what `init` could not.
+
 ## 0.7.0
 
 The release where a handoff that fired correctly still handed over nothing. Three separate

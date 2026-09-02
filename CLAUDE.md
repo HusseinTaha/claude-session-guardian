@@ -103,6 +103,21 @@ recovered from disk. The spawn gate can only reach agents born after the climb; 
 already running are asked through their own tool calls, and when a payload carries nothing
 identifying one, the keys that did arrive go in the log.
 
+**A timeout you have not measured is not a timeout.** `spawnSync`'s `timeout` kills the shell
+it started, not the grandchild that shell started — and while Node holds a stdin pipe open
+for that grandchild, the call goes on waiting for it. Measured: a 300ms cap against a 3s
+child returned after 3139ms with `input`, and after 309ms with stdin on a file descriptor.
+`chain_timeout_ms` therefore capped nothing, and a slow chained bar held the whole status
+line for as long as it really took — worst exactly when a dozen agents were running. The
+payload goes to the child on a descriptor (`spawnChained`); the contract is unchanged.
+
+**A segment that fails should degrade, not vanish.** Three dots where the user's own bar used
+to be is a loss of real information at the moment they are watching it. Guardian keeps the
+last bar the chained command produced and shows that, marked `⋯` with its age, for up to ten
+minutes. The mark is not optional: this is the same rule as failing open loudly. And the
+`doctor` probe answers for the command, never for the cache — a gauge that agrees with a
+cache is agreeing with itself.
+
 **Burn defaults are calibrated, not chosen.** `scripts/calibrate.ts` replays real transcripts
 from `~/.claude/projects`. Changing `burn.*` means re-running it, not reasoning about it.
 
