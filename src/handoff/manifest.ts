@@ -17,6 +17,7 @@ import {
   type CheckpointResult,
 } from './git.ts';
 import { handoffDir, ensureGuardianDir, stateDir } from '../core/paths.ts';
+import { log } from '../core/log.ts';
 import { fmtMin } from '../budget/mode.ts';
 
 const BACKSLASH = /\\/g;
@@ -199,6 +200,11 @@ export function buildManifest(
 
   const ax = state.axes;
   const cp = opts.git === false ? null : checkpoint(projectDir, sessionId, stamp);
+  // A checkpoint that quietly degrades is one you discover at the moment you need it. The
+  // manifest already carries the reason; the log is what a later session actually reads.
+  if (cp && cp.kind !== 'ref' && cp.kind !== 'none') {
+    log(projectDir, 'warn', `checkpoint degraded to ${cp.kind}: ${cp.detail}`);
+  }
 
   return {
     schema: 1,

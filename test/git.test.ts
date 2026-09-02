@@ -10,6 +10,7 @@ import {
   removeCheckpoints,
   isRepo,
   refComponent,
+  failureReason,
 } from '../src/handoff/git.ts';
 
 function g(cwd: string, ...args: string[]): string {
@@ -133,4 +134,56 @@ test('refComponent produces components git accepts', () => {
   assert.equal(refComponent('a..b'), 'a__b');
   assert.equal(refComponent('___'), 'unknown');
   assert.equal(refComponent('2026-09-01T10-00-00'), '2026-09-01T10-00-00');
+});
+
+/** A required clean filter pointing at a command that does not exist makes `git add` fail
+ *  the same way a Windows reserved name in the tree does: exit 128, with the reason on
+ *  stderr and nothing on stdout. */
+function breakAdd(dir: string, pattern = '*'): void {
+  writeFileSync(join(dir, '.gitattributes'), `${pattern} filter=boom\n`);
+  g(dir, 'config', 'filter.boom.clean', 'guardian-no-such-filter');
+  g(dir, 'config', 'filter.boom.required', 'true');
+}
+
+test('a degraded checkpoint reports why git refused, not just which step failed', () => {
+  const dir = repo();
+  writeFileSync(join(dir, 'tracked.txt'), 'modified\n');
+  breakAdd(dir);
+
+  const cp = checkpoint(dir, 'sess-7', 'stamp');
+
+  assert.notEqual(cp.kind, 'ref');
+  // The step alone ("add failed") is what sent a real investigation to the wrong place.
+  assert.match(cp.detail, /add failed: /);
+  assert.match(cp.detail, /guardian-no-such-filter/);
+});
+
+test('with only untracked work, a failed add leaves stash create nothing to capture', () => {
+  const dir = repo();
+  writeFileSync(join(dir, 'untracked.txt'), 'new\n');
+  // Only the untracked file trips the filter, so `stash create` still runs — and finds
+  // nothing to capture, because no tracked file changed.
+  breakAdd(dir, 'untracked.txt');
+
+  const cp = checkpoint(dir, 'sess-8', 'stamp');
+
+  assert.equal(cp.kind, 'status-only');
+  assert.match(cp.detail, /no tracked changes/);
+  assert.ok(cp.dirty_files > 0);
+});
+
+test('a killed git reports the timeout, not an empty reason', () => {
+  // What a 10s cap on a 21.7s `add -A` actually leaves behind: thousands of CRLF
+  // advisories, no `error:` line, and the only real news in the spawn error.
+  const stderr = [
+    'spawnSync git ETIMEDOUT (SIGTERM after 30000ms)',
+    "warning: in the working copy of 'a.ts', LF will be replaced by CRLF the next time Git touches it",
+    "warning: in the working copy of 'b.ts', LF will be replaced by CRLF the next time Git touches it",
+  ].join('\n');
+
+  assert.match(failureReason('add', stderr), /ETIMEDOUT/);
+  assert.doesNotMatch(failureReason('add', stderr), /LF will be replaced/);
+  // Warnings alone are not a reason, and pretending otherwise is worse than saying nothing.
+  assert.equal(failureReason('add', 'warning: something harmless'), 'add failed');
+  assert.equal(failureReason('add', ''), 'add failed');
 });

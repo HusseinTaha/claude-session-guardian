@@ -72,6 +72,13 @@ prompt that asks for a next action. A latch or gate keyed on another actuator's 
 is keyed on the wrong thing — gate on the fact you actually need (here, an unrecorded
 intent).
 
+**A step name is not a reason.** For a day every checkpoint in one repo said `add failed`
+while git had written `error: open("ng/nul"): No such file or directory` — a Windows
+reserved device name in the tree — to a stderr nobody captured. The same empty message also
+covered `git add -A` being killed at a 10s cap on a working tree that needs 21.7s, because
+`spawnSync` reports a kill through `error` rather than a throw. Anything that shells out
+keeps both stderr and the spawn error, and a degraded path names the cause, not the step.
+
 **Burn defaults are calibrated, not chosen.** `scripts/calibrate.ts` replays real transcripts
 from `~/.claude/projects`. Changing `burn.*` means re-running it, not reasoning about it.
 

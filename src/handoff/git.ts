@@ -3,19 +3,66 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-function git(cwd: string, args: string[], env?: Record<string, string>): { ok: boolean; out: string } {
+interface GitResult {
+  ok: boolean;
+  out: string;
+  err: string;
+}
+
+/** Generous, because this budget is spent on the seal path and never on the hot one:
+ *  `sense()` makes no git calls at all. The old 10s cap silently killed `add -A` on a real
+ *  working tree where the same command takes 21.7s, so every checkpoint there fell back to
+ *  a weaker one — for a limit nothing was waiting on. */
+const GIT_TIMEOUT_MS = 30_000;
+
+function git(cwd: string, args: string[], env?: Record<string, string>): GitResult {
   try {
     const r = spawnSync('git', args, {
       cwd,
       encoding: 'utf8',
-      timeout: 10_000,
+      timeout: GIT_TIMEOUT_MS,
       windowsHide: true,
       env: { ...process.env, ...env },
     });
-    return { ok: r.status === 0, out: (r.stdout ?? '').trim() };
-  } catch {
-    return { ok: false, out: '' };
+    // A timeout or a failure to spawn arrives in `error`, not as a throw, and the git that
+    // was killed has usually written nothing but warnings to stderr. Reading only stderr
+    // made "we ran out of time" and "git refused" the same empty string.
+    const killed = r.error
+      ? `${r.error.message}${r.signal ? ` (${r.signal} after ${GIT_TIMEOUT_MS}ms)` : ''}`
+      : '';
+    return {
+      ok: r.status === 0,
+      out: (r.stdout ?? '').trim(),
+      err: [killed, r.stderr ?? ''].filter(Boolean).join('\n').trim(),
+    };
+  } catch (e) {
+    return { ok: false, out: '', err: (e as Error).message };
   }
+}
+
+/** The name of the step that failed is not the reason it failed. `add failed` was all a
+ *  degraded checkpoint ever said, while git had written the reason to stderr — on one
+ *  machine `error: open("ng/nul"): No such file or directory`, a Windows reserved device
+ *  name in the tree, which silently downgraded every checkpoint in that repo for a day.
+ *
+ *  git also writes one CRLF advisory per file to the same stream, so the actionable line
+ *  is the first `error:`/`fatal:` one; that is the one naming the path. */
+export function failureReason(step: string, err: string): string {
+  const lines = err
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const named = lines.filter((l) => /^(?:fatal|error):/.test(l));
+  // Nothing named means git never got to complain — the line that matters is then the one
+  // this process wrote itself, such as an ETIMEDOUT.
+  const first = named[0] ?? lines.find((l) => !/^(?:warning|hint):/.test(l));
+  if (!first) return `${step} failed`;
+  const more = named.length > 1 ? ` (+${named.length - 1} more)` : '';
+  return `${step} failed: ${first.slice(0, 180)}${more}`;
+}
+
+function failed(step: string, res: GitResult): Error {
+  return new Error(failureReason(step, res.err));
 }
 
 /** git-check-ref-format is stricter than a filesystem: a path component may not begin
@@ -82,21 +129,24 @@ export function checkpoint(projectDir: string, sessionId: string, stamp: string)
     const indexFile = join(tmp, 'index');
     const env = { GIT_INDEX_FILE: indexFile };
 
-    if (head && !git(projectDir, ['read-tree', 'HEAD'], env).ok) {
-      throw new Error('read-tree failed');
+    if (head) {
+      const readTree = git(projectDir, ['read-tree', 'HEAD'], env);
+      if (!readTree.ok) throw failed('read-tree', readTree);
     }
     // -A honours .gitignore, so ignored files stay out of the checkpoint.
-    if (!git(projectDir, ['add', '-A'], env).ok) throw new Error('add failed');
+    const add = git(projectDir, ['add', '-A'], env);
+    if (!add.ok) throw failed('add', add);
     const tree = git(projectDir, ['write-tree'], env);
-    if (!tree.ok || !tree.out) throw new Error('write-tree failed');
+    if (!tree.ok || !tree.out) throw failed('write-tree', tree);
 
     const msg = `guardian checkpoint ${stamp} (session ${sessionId})`;
     const args = ['commit-tree', tree.out, '-m', msg];
     if (head) args.push('-p', head);
     const commit = git(projectDir, args);
-    if (!commit.ok || !commit.out) throw new Error('commit-tree failed');
+    if (!commit.ok || !commit.out) throw failed('commit-tree', commit);
 
-    if (!git(projectDir, ['update-ref', ref, commit.out]).ok) throw new Error('update-ref failed');
+    const updateRef = git(projectDir, ['update-ref', ref, commit.out]);
+    if (!updateRef.ok) throw failed('update-ref', updateRef);
 
     return {
       kind: 'ref',
@@ -120,9 +170,15 @@ export function checkpoint(projectDir: string, sessionId: string, stamp: string)
         branch,
         head,
         dirty_files: dirty,
-        detail: `plumbing path failed (${(err as Error).message}); used stash create`,
+        detail: `plumbing path failed (${(err as Error).message}); used stash create, which captures tracked changes only`,
       };
     }
+    // `stash create` exits 0 and prints nothing when no *tracked* file has changed, so a
+    // working tree dirty only with untracked files leaves the fallback with nothing to
+    // capture. Saying which of the two happened is the difference between a lead and a shrug.
+    const stashWhy = stash.ok
+      ? 'stash create found no tracked changes to capture'
+      : failed('stash create', stash).message;
     return {
       kind: 'status-only',
       ref: null,
@@ -130,7 +186,7 @@ export function checkpoint(projectDir: string, sessionId: string, stamp: string)
       branch,
       head,
       dirty_files: dirty,
-      detail: `could not checkpoint (${(err as Error).message}); recorded state only`,
+      detail: `could not checkpoint (${(err as Error).message}; ${stashWhy}); recorded state only`,
     };
   } finally {
     if (tmp) {
