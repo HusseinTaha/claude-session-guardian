@@ -16,6 +16,29 @@ export function configPath(projectDir: string): string {
   return join(stateDir(projectDir), 'config.json');
 }
 
+/** Where an agent keeps its own handoff.
+ *
+ *  The spawn gate tells each agent this path and the manifest reads it back, so the name
+ *  has to be derived the same way in both places — one function, not two slugifiers that
+ *  agree until someone edits one of them. */
+export function agentNotesDir(projectDir: string): string {
+  return join(stateDir(projectDir), 'agent-notes');
+}
+
+export function agentNoteSlug(description: string): string {
+  return (
+    description
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 40) || 'agent'
+  );
+}
+
+export function agentNotesFile(projectDir: string, description: string): string {
+  return join(agentNotesDir(projectDir), `${agentNoteSlug(description)}.md`);
+}
+
 export function logPath(projectDir: string): string {
   return join(stateDir(projectDir), 'logs', 'guardian.log');
 }

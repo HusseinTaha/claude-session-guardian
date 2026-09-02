@@ -34,6 +34,13 @@ This is the highest-value line in the manifest. Compare:
 - Good: `"Finish rotateRefreshToken() in src/auth/refresh.ts:88 — the happy path works, the
   reuse-detection branch is unwritten. Then run npm test -- auth."`
 
+**A note you wrote earlier in this session does not count.** It described the state you were
+in then, and a long session leaves that state behind within the hour. Guardian says so when
+it can see work recorded after the note — "the recorded next action is 24.0 hours old and 2
+commits came after it" — and a stale note is worse than none, because it reads as current
+and the resuming session acts on it. When you see that line, write the next action again for
+where the work actually is; do not conclude that the box is already ticked.
+
 Add these when they apply:
 
 ```bash
@@ -101,6 +108,15 @@ on it.
 
 **Do not re-run tests just to make the manifest look better.** Guardian recorded the last
 real result.
+
+**A running subagent is its own handoff, and it may have nothing in it.** Nothing can pause
+or resume an agent — its state is its context — so the only part of it that survives is the
+notes file under `.claude/guardian/agent-notes/`. Guardian asks each agent to keep that file
+current, but an agent spawned before the session got close to a wall was never asked, and
+Guardian says which ones have written nothing down. Those are the one part of the session
+that is genuinely unrecoverable: let them return before you stop if the budget allows, and
+if it does not, say in the handoff what each was asked to do so the next session can decide
+whether to run it again.
 
 ## Resuming later
 

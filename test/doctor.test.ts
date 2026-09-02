@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { audit, auditManifest, renderChecks, verdict, coldResume, logTail } from '../src/ui/doctor.ts';
 import { emptyState, writeState } from '../src/core/state.ts';
-import { seal, readLatest, buildManifest, type Manifest } from '../src/handoff/manifest.ts';
+import { seal, readLatest, buildManifest, renderDigest, type Manifest } from '../src/handoff/manifest.ts';
 import { appendEvent, fileEvent } from '../src/handoff/ledger.ts';
 import { configPath } from '../src/core/paths.ts';
 import { install } from '../src/ui/install.ts';
@@ -341,4 +341,55 @@ test('a chained status line that cannot run is a warning, not a silent gap', () 
   assert.equal(statusOf(checks, 'chained bar'), 'warn');
   // chained_from unset means Guardian is running a snapshot of that command forever.
   assert.equal(statusOf(checks, 'chain source'), 'warn');
+});
+
+// ------------------------------------------------------------------ a clobbered latest
+
+test('doctor audits the real handoff when latest records nothing, and says it did', () => {
+  const dir = tmp();
+  const real = fullSession(dir);
+  // An unrelated session exits having done nothing, the way one did at 11:19 on a real
+  // machine, two minutes after the handoff that mattered.
+  const empty = buildManifest(dir, 'throwaway', state(), 'SessionEnd (other)', T + 120, { git: false });
+  writeFileSync(join(dir, '.claude', 'guardian', 'handoff', 'latest.json'), JSON.stringify(empty));
+  writeFileSync(join(dir, '.claude', 'guardian', 'handoff', 'latest.md'), renderDigest(empty, dir));
+
+  const checks = audit(dir, state(), T + 120, join(dir, 'nope.json'));
+  assert.equal(statusOf(checks, 'handoff on offer'), 'warn');
+  assert.match(byName(checks, 'handoff on offer')!.detail, /latest records nothing/);
+  // The audit below it must be of the real manifest, not of the empty one.
+  assert.match(byName(checks, 'objective')!.detail, /Implement auth/);
+  assert.match(byName(checks, 'next action')!.detail, /rotateRefreshToken/);
+  // And the digest on disk belongs to the seal that clobbered it, which is a failure and
+  // not a pass: existing is not the same as being this manifest's summary.
+  assert.equal(statusOf(checks, 'digest'), 'fail');
+  assert.equal(real.session.id, 's1');
+});
+
+test('a stale next action fails the audit rather than passing as intent', () => {
+  const dir = tmp();
+  appendEvent(dir, 's1', { k: 'note', t: T - 7200, field: 'next_action', text: 'Ship lane K' });
+  appendEvent(dir, 's1', { k: 'commit', t: T - 60, sha: 'abc12345', subject: 'lane L' });
+  writeState(dir, state());
+  seal(dir, 's1', state(), 'auto-seal (EMERGENCY)', T, { git: false });
+
+  const checks = audit(dir, state(), T, join(dir, 'nope.json'));
+  assert.equal(statusOf(checks, 'next action'), 'fail');
+  assert.match(byName(checks, 'next action')!.detail, /stale — written 2\.0 hours before the seal/);
+  assert.match(byName(checks, 'next action')!.detail, /1 commit/);
+});
+
+test('a manifest sealed before staleness was tracked is still checked, from its ledger', () => {
+  const dir = tmp();
+  appendEvent(dir, 's1', { k: 'note', t: T - 7200, field: 'next_action', text: 'Ship lane K' });
+  appendEvent(dir, 's1', { k: 'commit', t: T - 60, sha: 'abc12345', subject: 'lane L' });
+  writeState(dir, state());
+  const m = seal(dir, 's1', state(), 'manual', T, { git: false });
+  // What an older build wrote: a note with no timestamp beside it. This is the manifest
+  // sitting in real projects, and it must not read as a pass.
+  const old = { ...m, claude_supplied: { ...m.claude_supplied, next_action_at: null, next_action_superseded: null } };
+
+  const checks = auditManifest(dir, old as Manifest);
+  assert.equal(statusOf(checks, 'next action'), 'fail');
+  assert.match(byName(checks, 'next action')!.detail, /written before 1 commit recorded after it/);
 });

@@ -78,7 +78,14 @@ export interface GuardianState {
   /** Bounded ring of recent observations, oldest first. */
   samples: Sample[];
   /** Latches that must fire at most once per session. */
-  latches: { stop_forced?: boolean; resume_offered?: boolean; auto_sealed?: boolean };
+  latches: {
+    stop_forced?: boolean;
+    resume_offered?: boolean;
+    auto_sealed?: boolean;
+    /** Agents already told to write their own handoff, so the ask lands once per agent
+     *  rather than on every tool call it makes. */
+    agents_asked?: string[];
+  };
   /** Set when a 429 has been observed, with the epoch second the window reopens. */
   hard_stop: { at: number; kind: string; resets_at: number | null } | null;
   manifest: { sealed_at: number | null };

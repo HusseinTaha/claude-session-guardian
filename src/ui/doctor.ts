@@ -13,7 +13,15 @@ import { tmpdir } from 'node:os';
 import { join, dirname, relative } from 'node:path';
 import type { GuardianState } from '../types.ts';
 import { loadConfig } from '../core/config.ts';
-import { readLatest, verify, latestDigestPath, type Manifest } from '../handoff/manifest.ts';
+import {
+  readBestHandoff,
+  nextActionStatus,
+  verify,
+  latestDigestPath,
+  describeSuperseded,
+  staleAge,
+  type Manifest,
+} from '../handoff/manifest.ts';
 import { listCheckpoints, isRepo } from '../handoff/git.ts';
 import { readUserConfig, validateConfig } from './configCmd.ts';
 import { userSettingsPath, stateDir, settingsChain, logPath } from '../core/paths.ts';
@@ -207,7 +215,18 @@ export function audit(
   }
 
   // ---------------------------------------------------------------- the handoff itself
-  const m = readLatest(projectDir);
+  const ref = readBestHandoff(projectDir);
+  const m = ref?.manifest ?? null;
+  if (ref?.rescued) {
+    // The audit below reads a real manifest, so without this line doctor would pass a
+    // project whose `latest` — the file every resume path opens first — is empty.
+    checks.push({
+      name: 'handoff on offer',
+      status: 'warn',
+      detail: `latest records nothing; audited the newest real handoff instead (${ref.path})`,
+      fix: 'run `/guardian resume` to promote it back, or `guardian handoff` to seal now',
+    });
+  }
   if (!m) {
     checks.push({
       name: 'handoff',
@@ -293,8 +312,25 @@ function recentChainFailures(projectDir: string, now: number): number {
 export function auditManifest(projectDir: string, m: Manifest): Check[] {
   const checks: Check[] = [];
 
+  // A manifest sealed by an older build has no timestamp on its note, and that is exactly
+  // the manifest sitting in projects today. The ledger it came from is still there, so ask
+  // that instead of reporting an unknown as a pass.
+  const fromLedger =
+    m.claude_supplied.next_action && m.claude_supplied.next_action_at === null
+      ? nextActionStatus(projectDir, m.session.id)?.superseded ?? null
+      : null;
+  const sup = m.claude_supplied.next_action_superseded ?? fromLedger;
   checks.push(
-    m.claude_supplied.next_action
+    m.claude_supplied.next_action && sup
+      ? {
+          name: 'next action',
+          status: 'fail',
+          detail:
+            `stale — ${m.claude_supplied.next_action_at === null ? 'written before' : `written ${staleAge(m)} before the seal, with`} ` +
+            `${describeSuperseded(sup)} recorded after it: "${m.claude_supplied.next_action}"`,
+          fix: 'guardian note --next "<what should happen now>" && guardian handoff',
+        }
+      : m.claude_supplied.next_action
       ? { name: 'next action', status: 'pass', detail: `"${m.claude_supplied.next_action}"` }
       : {
           name: 'next action',
@@ -405,11 +441,26 @@ export function auditManifest(projectDir: string, m: Manifest): Check[] {
     });
   }
 
-  const digestExists = existsSync(latestDigestPath(projectDir));
+  // Existing is not enough: the file has to be the digest of THIS manifest. A `latest.md`
+  // left behind by another session's seal passes an existence check and hands the next
+  // session someone else's summary.
+  let digest: string | null = null;
+  try {
+    digest = readFileSync(latestDigestPath(projectDir), 'utf8');
+  } catch {
+    digest = null;
+  }
   checks.push(
-    digestExists
-      ? { name: 'digest', status: 'pass', detail: 'the injectable summary exists' }
-      : { name: 'digest', status: 'fail', detail: 'latest.md is missing', fix: 're-seal with `guardian handoff`' },
+    digest === null
+      ? { name: 'digest', status: 'fail', detail: 'latest.md is missing', fix: 're-seal with `guardian handoff`' }
+      : digest.includes(m.sealed_at_iso)
+        ? { name: 'digest', status: 'pass', detail: 'the injectable summary exists' }
+        : {
+            name: 'digest',
+            status: 'fail',
+            detail: 'latest.md is the digest of a different seal than the manifest audited here',
+            fix: 'run `/guardian resume` to promote the real handoff, or re-seal',
+          },
   );
 
   return checks;

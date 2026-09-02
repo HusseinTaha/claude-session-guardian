@@ -3,7 +3,14 @@ import { resolveStateRoot, stateDir } from '../core/paths.ts';
 import { loadConfig } from '../core/config.ts';
 import { readState } from '../core/state.ts';
 import { renderDashboard } from '../format/render.ts';
-import { seal, readLatest, latestDigestPath } from '../handoff/manifest.ts';
+import {
+  seal,
+  readBestHandoff,
+  renderDigest,
+  describeSuperseded,
+  staleAge,
+  latestDigestPath,
+} from '../handoff/manifest.ts';
 import { appendEvent } from '../handoff/ledger.ts';
 import { latestSessionIn } from '../core/sessions.ts';
 import { log } from '../core/log.ts';
@@ -105,15 +112,29 @@ function callTool(name: string, args: Record<string, unknown>, now: number): Rec
         `  commits:       ${m.observed.commits.length}`,
         `  checkpoint:    ${cp?.ref ?? cp?.detail ?? 'none'}`,
         m.claude_supplied.next_action
-          ? `  next action:   ${m.claude_supplied.next_action}`
+          ? m.claude_supplied.next_action_superseded
+            ? `  next action:   STALE — written ${staleAge(m)} before this seal, with ` +
+              `${describeSuperseded(m.claude_supplied.next_action_superseded)} after it. ` +
+              'Call again with a next_action describing what should happen now.'
+            : `  next action:   ${m.claude_supplied.next_action}`
           : '  next action:   MISSING — a resuming session will have to guess. Call again with next_action.',
       ];
       return text(lines.join('\n'));
     }
 
     case 'guardian_resume_context': {
-      const m = readLatest(projectDir);
-      if (!m) return text('No sealed handoff exists for this project.');
+      const ref = readBestHandoff(projectDir);
+      if (!ref) return text('No sealed handoff exists for this project.');
+      // A rescued manifest came out of history because `latest` recorded nothing; its
+      // digest has to be rendered, and the caller told where it came from.
+      if (ref.rescued) {
+        return text(
+          `(The handoff on offer recorded nothing; this is the most recent one that does, ` +
+            `read from ${ref.path}.)
+
+${renderDigest(ref.manifest, projectDir)}`,
+        );
+      }
       try {
         return text(readFileSync(latestDigestPath(projectDir), 'utf8'));
       } catch {

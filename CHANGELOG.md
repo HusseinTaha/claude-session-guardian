@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.7.0
+
+The release where a handoff that fired correctly still handed over nothing. Three separate
+faults lined up on one real session: the manifest was clobbered, its intent was a day old,
+and the agents still running were counted rather than handed over.
+
+### `latest` is no longer whoever exited last
+
+- **An empty seal could displace a real handoff.** `latest` is one file per project and every
+  session seals on the way out, so a session that opened, idled and exited wrote 397 bytes
+  over a 108KB manifest two minutes after it landed. A seal that records nothing no longer
+  displaces one that records something; history keeps every seal either way.
+- **`SessionEnd` seals nothing when nothing was observed**, so short sessions stop pushing
+  real handoffs out of the twenty-slot history — and pruning never drops the archive copy of
+  whatever `latest` points at.
+- **`readBestHandoff` reads past a clobber that already happened**: when `latest` records
+  nothing, `/guardian resume`, `verify`, `doctor` and the MCP resume tool take the newest
+  handoff in history that does, say where it came from, and promote it back on use.
+- **`doctor` checks the digest is this manifest's digest**, not merely that `latest.md`
+  exists. An existence check passed while the file summarised somebody else's seal.
+
+### A next action has a shelf life
+
+- The note now carries **when it was written** and **what was recorded after it**. A
+  nine-hour session that wrote "ONLY LANE K REMAINS" in hour one sealed it unchanged at
+  EMERGENCY, and it read as current.
+- Everything that shows a next action now says when it is spent: the digest heads it
+  `## Next action — STALE`, the resume protocol agrees, `doctor` fails it, and the auto-seal
+  message, landing brief and resume offer all name the age and the work that followed.
+- **The Stop brake treats a superseded note as no note.** It used to see that intent existed
+  and let the turn end — the one prompt that asks for the thing Guardian cannot observe,
+  disarmed by a note from the previous day.
+
+### Every running agent is handed over, not counted
+
+- The manifest carries, per agent, **what it was asked to do, how long it had run, how full
+  its own context was, and whether its notes file has anything in it** — merged from the live
+  subagent registry, which the handoff layer can now read (`src/core/agents.ts`).
+- **In-flight agents that wrote nothing down are named** in the digest, the resume protocol,
+  the auto-seal message and `guardian handoff`: they are the only part of a session that
+  cannot be recovered from disk.
+- **Agents already running when the session climbs are asked to checkpoint.** The spawn gate
+  only reaches agents born after the climb; the rest are asked through their own tool calls,
+  once each. Where a payload carries nothing identifying an agent, the keys that did arrive
+  go in the log rather than the feature failing silently.
+
 ## 0.6.0
 
 The release where the estimator was calibrated against real data and the install path was

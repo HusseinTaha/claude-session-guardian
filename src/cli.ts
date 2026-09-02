@@ -13,8 +13,12 @@ import { appendEvent, type NoteField } from './handoff/ledger.ts';
 import {
   seal,
   readLatest,
+  readBestHandoff,
   markConsumed,
   verify,
+  renderDigest,
+  describeSuperseded,
+  staleAge,
   latestDigestPath,
   latestPath,
 } from './handoff/manifest.ts';
@@ -118,16 +122,30 @@ const NOTE_FLAGS: Array<[string, NoteField]> = [
 ];
 
 function cmdResume(projectDir: string, out: (s: string) => void): number {
-  const m = readLatest(projectDir);
-  if (!m) {
+  const ref = readBestHandoff(projectDir);
+  if (!ref) {
     out('No sealed handoff found for this project.\n');
     return 0;
   }
+  const m = ref.manifest;
+  // Say where this came from. `latest` holding nothing while the real handoff sits in
+  // history is exactly the failure that reads as "Guardian handed you nothing", and a
+  // digest that arrives unexplained invites the same conclusion twice.
+  if (ref.rescued) {
+    out(`> The handoff on offer recorded nothing. This is the most recent one that does,\n`);
+    out(`> read from ${ref.path}. It is now the one on offer.\n\n`);
+  }
   let digest: string;
-  try {
-    digest = readFileSync(latestDigestPath(projectDir), 'utf8');
-  } catch {
-    digest = `(digest missing; manifest is at ${latestPath(projectDir)})`;
+  if (ref.rescued) {
+    // A rescued manifest has no digest file of its own: latest.md belongs to whatever
+    // displaced it.
+    digest = renderDigest(m, projectDir);
+  } else {
+    try {
+      digest = readFileSync(latestDigestPath(projectDir), 'utf8');
+    } catch {
+      digest = `(digest missing; manifest is at ${latestPath(projectDir)})`;
+    }
   }
   out(`${digest}\n`);
 
@@ -152,8 +170,15 @@ function cmdResume(projectDir: string, out: (s: string) => void): number {
   }
   if (v.head_matches === true) out('- git HEAD is unchanged since the handoff\n');
   if (v.head_matches === false) out('- git HEAD has MOVED since the handoff\n');
+  const stale = m.claude_supplied.next_action_superseded;
   if (!changed.length && !missing.length && v.head_matches !== false) {
-    out('\nThe workspace matches the handoff. Resume directly from "next action".\n');
+    // "Resume directly from next action" over a next action the digest just marked STALE is
+    // the summary line disagreeing with the document above it.
+    out(
+      stale
+        ? '\nThe workspace matches the handoff, but its "next action" is stale: re-derive the\nnext step from the sections above before acting.\n'
+        : '\nThe workspace matches the handoff. Resume directly from "next action".\n',
+    );
   } else {
     out('\nThe workspace has drifted from the handoff. Reconcile the differences above\nbefore acting on "next action".\n');
   }
@@ -329,7 +354,7 @@ function cmdDoctor(projectDir: string, argv: string[], out: (s: string) => void)
     return strict && !v.resumable ? 1 : 0;
   }
 
-  const m = readLatest(projectDir);
+  const m = readBestHandoff(projectDir)?.manifest ?? null;
   if (!m) {
     out('\nNo manifest to cold-resume.\n');
     return 1;
@@ -436,6 +461,15 @@ function main(argv: string[]): number {
       writeState(projectDir, { ...state, manifest: { sealed_at: m.sealed_at } });
       const cp = m.observed.checkpoint;
       out(`Sealed handoff (${reason}).\n`);
+      // A seal that recorded nothing does not displace a real handoff. Saying "sealed"
+      // without saying that leaves the report contradicting the file it names.
+      const onOffer = readLatest(projectDir);
+      if (!onOffer || onOffer.sealed_at !== m.sealed_at || onOffer.session.id !== m.session.id) {
+        out('  NOT on offer:  this session recorded nothing, so `latest` still holds the\n');
+        out(`                 handoff from session ${onOffer?.session.id ?? 'unknown'} `);
+        out(`(${onOffer?.observed.files_touched.length ?? 0} file(s)). This seal is\n`);
+        out('                 archived under handoff/history.\n');
+      }
       out(`  files tracked: ${m.observed.files_touched.length}\n`);
       out(`  commits:       ${m.observed.commits.length}\n`);
       out(`  checkpoint:    ${cp ? `${cp.kind}${cp.ref ? ` ${cp.ref}` : ''} — ${cp.detail}` : 'skipped'}\n`);
@@ -450,9 +484,22 @@ function main(argv: string[]): number {
         out('  They keep going. The manifest records them so the next session knows what\n');
         out('  may need redoing; let them finish if you can.\n');
       }
+      const sup = m.claude_supplied.next_action_superseded;
       if (!m.claude_supplied.next_action) {
         out('\nNo next action recorded. Add one so the next session does not have to guess:\n');
         out('  guardian note --next "<the single most specific next step>"\n');
+      } else if (sup) {
+        out(`\nThe next action in this handoff is ${staleAge(m)} old, and `);
+        out(`${describeSuperseded(sup)} were recorded after it. It describes work that\n`);
+        out('has since happened. Replace it and seal again:\n');
+        out('  guardian note --next "<the single most specific next step>"\n');
+        out(`  guardian handoff --reason "${reason}"\n`);
+      }
+      const silent = m.agents.filter((a) => a.status === 'IN_FLIGHT_AT_SEAL' && !a.notes_recorded);
+      if (silent.length) {
+        out(`\n${silent.length} running agent(s) have written nothing down, so their work is\n`);
+        out('not in this handoff. Let them return before you stop if you can:\n');
+        for (const a of silent) out(`    ${a.type} (${a.id}) — ${a.description ?? 'no description'}\n`);
       }
       return 0;
     }
@@ -509,11 +556,13 @@ function main(argv: string[]): number {
       return cmdResume(projectDir, out);
 
     case 'verify': {
-      const m = readLatest(projectDir);
-      if (!m) {
+      const ref = readBestHandoff(projectDir);
+      if (!ref) {
         out('No sealed handoff to verify.\n');
         return 0;
       }
+      const m = ref.manifest;
+      if (ref.rescued) out(`(latest records nothing; verifying ${ref.path} instead)\n\n`);
       const v = verify(projectDir, m);
       for (const f of v.files) out(`${f.status.padEnd(13)} ${f.path}\n`);
       out(`\ngit HEAD: ${v.head_matches === null ? 'not comparable' : v.head_matches ? 'unchanged' : 'moved'}\n`);

@@ -15,7 +15,7 @@ import { handle } from '../src/actuators/dispatch.ts';
 import { emptyState, readState, writeState } from '../src/core/state.ts';
 import { readLatest, seal } from '../src/handoff/manifest.ts';
 import { DEFAULT_CONFIG } from '../src/core/config.ts';
-import { configPath } from '../src/core/paths.ts';
+import { configPath, logPath } from '../src/core/paths.ts';
 import { appendEvent } from '../src/handoff/ledger.ts';
 import type { GuardianState, Mode } from '../src/types.ts';
 
@@ -545,4 +545,134 @@ test('a missing tool output is recorded as unclear and leaves a mark in the log'
   assert.equal(m.observed.tests?.ok, null, 'an invented verdict is worse than an absent one');
   const log = readFileSync(join(dir, '.claude', 'guardian', 'logs', 'guardian.log'), 'utf8');
   assert.match(log, /carried no tool output; keys: /);
+});
+
+// ------------------------------------------------------------------ stale intent
+
+/** The failure this covers, in full: a nine-hour session records its next action early,
+ *  keeps working, climbs to EMERGENCY, auto-seals — and hands over a note from the previous
+ *  day as if it were the plan. Every surface that reads a next action has to be able to say
+ *  "that one is spent". */
+function seedStaleIntent(dir: string, sid = 's1'): void {
+  appendEvent(dir, sid, {
+    k: 'note',
+    t: T - 86_400,
+    field: 'next_action',
+    text: 'ONLY LANE K REMAINS — HEAD decdc74c0',
+  });
+  appendEvent(dir, sid, { k: 'commit', t: T - 3600, sha: 'aa11bb22', subject: 'lane L' });
+  appendEvent(dir, sid, { k: 'commit', t: T - 1800, sha: 'cc33dd44', subject: 'lane M' });
+}
+
+test('Stop refuses again when the recorded next action predates the work', () => {
+  const dir = tmp();
+  seedStaleIntent(dir);
+  writeState(dir, { ...stateAt('LAND'), manifest: { sealed_at: T - 10 } });
+  seal(dir, 's1', stateAt('LAND'), 'auto-seal (LAND)', T - 10, { git: false });
+  assert.ok(readLatest(dir)!.claude_supplied.next_action, 'a note is on file');
+
+  const r = hook('Stop', { session_id: 's1', cwd: dir }, T);
+  assert.equal(r.exit, 2, 'a note written before two commits is not this turn’s intent');
+  assert.match(r.stderr!, /24\.0 hours old/);
+  assert.match(r.stderr!, /2 commits were recorded after it/);
+  assert.match(r.stderr!, /replace the/);
+});
+
+test('Stop stays out of the way once the next action is current', () => {
+  const dir = tmp();
+  appendEvent(dir, 's1', { k: 'commit', t: T - 3600, sha: 'aa11bb22', subject: 'lane L' });
+  appendEvent(dir, 's1', { k: 'note', t: T - 20, field: 'next_action', text: 'Run npm run check' });
+  writeState(dir, { ...stateAt('LAND'), manifest: { sealed_at: T - 10 } });
+  seal(dir, 's1', stateAt('LAND'), 'manual', T - 10, { git: false });
+  assert.equal(hook('Stop', { session_id: 's1', cwd: dir }, T).exit, 0);
+});
+
+test('the landing brief says whether the intent on file is spent', () => {
+  const dir = tmp();
+  seedStaleIntent(dir);
+  writeState(dir, stateAt('EMERGENCY'));
+  const ctx = hook('UserPromptSubmit', { session_id: 's1', cwd: dir }, T).out.additionalContext;
+  assert.match(ctx, /Guardian: EMERGENCY/);
+  assert.match(ctx, /a next action IS recorded, written 24\.0 hours ago/);
+  assert.match(ctx, /2 commits have been recorded since/);
+  assert.match(ctx, /It is stale/);
+});
+
+test('the landing brief says when nothing has been recorded at all', () => {
+  const dir = tmp();
+  writeState(dir, stateAt('LAND'));
+  const ctx = hook('UserPromptSubmit', { session_id: 's1', cwd: dir }, T).out.additionalContext;
+  assert.match(ctx, /no next action recorded for this session yet/);
+});
+
+test('a calm session gets no word about its intent either way', () => {
+  const dir = tmp();
+  writeState(dir, stateAt('PREPARE'));
+  const ctx = hook('UserPromptSubmit', { session_id: 's1', cwd: dir }, T).out.additionalContext;
+  assert.doesNotMatch(ctx, /next action/);
+});
+
+test('the auto-seal message asks for a fresh next action when the one on file is spent', () => {
+  const dir = tmp();
+  seedStaleIntent(dir);
+  writeState(dir, stateAt('LAND'));
+  const msg = toolCall(dir, 's1', T).out.systemMessage;
+  assert.match(msg, /recorded next action is 24\.0 hours old/);
+  assert.match(msg, /Replace it now/);
+});
+
+test('a session that observed nothing seals no handoff on the way out', () => {
+  const dir = tmp();
+  writeState(dir, { ...stateAt('NORMAL'), samples: [{ t: T - 60, context: 4 }] });
+  assert.equal(hook('SessionEnd', { session_id: 's1', cwd: dir, reason: 'other' }, T).exit, 0);
+  assert.equal(readLatest(dir), null, 'nothing observed is nothing to hand over');
+  assert.match(readFileSync(logPath(dir), 'utf8'), /nothing observed/);
+});
+
+// ------------------------------------------------------------------ agents already running
+
+test('an agent already running is asked to write its own handoff, once', () => {
+  const dir = tmp();
+  writeState(dir, stateAt('LAND'));
+  const payload = {
+    session_id: 's1',
+    cwd: dir,
+    tool_name: 'Read',
+    tool_input: { file_path: join(dir, 'x.ts') },
+    agent_id: 'ag7',
+    agent_type: 'general-purpose',
+  };
+
+  const first = hook('PostToolUse', payload, T);
+  const ctx = first.out.hookSpecificOutput.additionalContext as string;
+  // The spawn gate cannot reach this one: it was born before the session climbed.
+  assert.match(ctx, /You are a subagent/);
+  assert.match(ctx, /agent-notes\/general-purpose\.md/);
+  assert.equal(first.exit, 0, 'a nudge must never look like a refusal');
+
+  // Once per agent. Every tool call it makes must not re-ask.
+  const second = hook('PostToolUse', payload, T + 5);
+  assert.equal(second.out?.hookSpecificOutput, undefined);
+  assert.deepEqual(readState(dir, 's1').latches.agents_asked, ['ag7']);
+});
+
+test('a main-thread tool call is not mistaken for an agent, and says so in the log', () => {
+  const dir = tmp();
+  writeState(dir, stateAt('LAND'));
+  const r = hook('PostToolUse', { session_id: 's1', cwd: dir, tool_name: 'Read', tool_input: {} }, T);
+  assert.equal(r.out?.hookSpecificOutput, undefined);
+  // The field may simply not arrive on this build of Claude Code. That is a fact to record,
+  // not to assume either way: 154 nulls once passed for a working feature here.
+  assert.match(readFileSync(logPath(dir), 'utf8'), /no agent identity on a PostToolUse at LAND; keys:/);
+});
+
+test('a calm session leaves running agents alone', () => {
+  const dir = tmp();
+  writeState(dir, stateAt('WATCH'));
+  const r = hook(
+    'PostToolUse',
+    { session_id: 's1', cwd: dir, tool_name: 'Read', tool_input: {}, agent_id: 'ag7' },
+    T,
+  );
+  assert.equal(r.out, null);
 });

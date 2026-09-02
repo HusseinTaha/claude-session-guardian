@@ -1,32 +1,12 @@
 import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { stateDir, sanitize, ensureGuardianDir } from '../core/paths.ts';
+import { stateDir, ensureGuardianDir } from '../core/paths.ts';
+// The snapshot type and its readers live in core: the handoff has to read them to hand over
+// each running agent, and it sits below this layer. Re-exported so callers see one module.
+import { agentsPath, emptyAgents, type AgentsFile, type AgentSnapshot } from '../core/agents.ts';
 
-/** One live subagent, as reported by `subagentStatusLine` and sampled over time. */
-export interface AgentSnapshot {
-  id: string;
-  name: string | null;
-  type: string | null;
-  status: string | null;
-  /** What this agent was actually asked to do. The default row leads with it, and dropping
-   *  it for a gauge trades the only field that says which agent this is. */
-  description: string | null;
-  /** Epoch seconds. */
-  started_at: number | null;
-  token_count: number | null;
-  context_window: number | null;
-  /** Bounded ring of (epoch seconds, token count), oldest first. */
-  samples: Array<{ t: number; tokens: number }>;
-  tokens_per_min: number | null;
-  last_seen: number;
-}
-
-export interface AgentsFile {
-  schema: 1;
-  session_id: string;
-  updated_at: number;
-  agents: Record<string, AgentSnapshot>;
-}
+export { agentsPath, emptyAgents, readAgents, isLive, liveCount } from '../core/agents.ts';
+export type { AgentsFile, AgentSnapshot } from '../core/agents.ts';
 
 /** A task row from the `subagentStatusLine` payload. Every field is optional: `model` and
  *  `contextWindowSize` are documented as absent until the task's model resolves, and
@@ -50,10 +30,6 @@ export interface TaskRow {
 const MAX_SAMPLES = 40;
 const MAX_DURATIONS = 50;
 
-export function agentsPath(projectDir: string, sessionId: string): string {
-  return join(stateDir(projectDir), 'sessions', `${sanitize(sessionId)}.agents.json`);
-}
-
 export function statsPath(projectDir: string): string {
   return join(stateDir(projectDir), 'agent-stats.json');
 }
@@ -63,19 +39,6 @@ function writeAtomic(projectDir: string, p: string, content: string): void {
   const tmp = `${p}.${process.pid}.tmp`;
   writeFileSync(tmp, content);
   renameSync(tmp, p);
-}
-
-export function emptyAgents(sessionId: string): AgentsFile {
-  return { schema: 1, session_id: sessionId, updated_at: 0, agents: {} };
-}
-
-export function readAgents(projectDir: string, sessionId: string): AgentsFile {
-  try {
-    const f = JSON.parse(readFileSync(agentsPath(projectDir, sessionId), 'utf8')) as AgentsFile;
-    return f?.schema === 1 ? f : emptyAgents(sessionId);
-  } catch {
-    return emptyAgents(sessionId);
-  }
 }
 
 export function writeAgents(projectDir: string, f: AgentsFile): void {
@@ -145,10 +108,6 @@ export function updateAgents(prev: AgentsFile, rows: TaskRow[], now: number): Ag
   }
 
   return { schema: 1, session_id: prev.session_id, updated_at: now, agents };
-}
-
-export function liveCount(f: AgentsFile, now: number, staleAfterS = 120): number {
-  return Object.values(f.agents).filter((a) => now - a.last_seen <= staleAfterS).length;
 }
 
 // ------------------------------------------------------------ historical durations

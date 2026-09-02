@@ -78,11 +78,18 @@ export function hardStoppedBrief(state: GuardianState): string {
 
 /** Instruction written to stderr when the `Stop` hook refuses to let the turn end.
  *  Deliberately narrow: one action, no room to interpret it as "carry on working". */
-export function forceSealInstruction(state: GuardianState): string {
+export function forceSealInstruction(
+  state: GuardianState,
+  stale?: { age: string; since: string } | null,
+): string {
+  const problem = stale
+    ? `the sealed handoff's next action is ${stale.age} old — ${stale.since} were recorded ` +
+      `after it, so it describes work that is already done`
+    : 'no handoff has been sealed';
   return (
-    `Session Guardian is in ${state.mode} (${state.reason}) and no handoff has been sealed. ` +
-    `Before stopping, do exactly this and nothing more: record the next action with ` +
-    `\`guardian note --next "<the single most specific next step>"\`, then run ` +
+    `Session Guardian is in ${state.mode} (${state.reason}) and ${problem}. ` +
+    `Before stopping, do exactly this and nothing more: ${stale ? 'replace' : 'record'} the ` +
+    `next action with \`guardian note --next "<the single most specific next step>"\`, then run ` +
     `\`guardian handoff --reason "${state.mode}"\`. Then stop.`
   );
 }

@@ -1,6 +1,8 @@
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { resolveStateRoot } from '../core/paths.ts';
+import { relative, sep } from 'node:path';
+import type { GuardianState } from '../types.ts';
+import { resolveStateRoot, agentNotesFile } from '../core/paths.ts';
 import { loadConfig } from '../core/config.ts';
 import { readState, writeState } from '../core/state.ts';
 import {
@@ -13,6 +15,13 @@ import {
 } from '../handoff/ledger.ts';
 import {
   seal,
+  buildManifest,
+  writeSeal,
+  carriesNothing,
+  describeSuperseded,
+  staleAge,
+  ageWords,
+  nextActionStatus,
   hasUnconsumed,
   latestDigestPath,
   latestPath,
@@ -122,6 +131,57 @@ function editedPath(input: Record<string, unknown> | undefined): string | null {
   return null;
 }
 
+/** Ask an agent that is ALREADY running to write its own handoff.
+ *
+ *  The spawn gate can only reach agents born after the session climbed: an agent spawned in
+ *  NORMAL and still working at EMERGENCY was never told to keep notes, and it is precisely
+ *  the long one whose loss hurts. A subagent's own tool calls come through this hook, so
+ *  when the payload identifies one, the ask rides back on the tool result — once per agent.
+ *
+ *  Whether the payload identifies an agent is Claude Code's business, not ours, and reading
+ *  a field that never arrives is a mistake this project has made before. So when nothing
+ *  identifies the caller at a mode where the ask is due, the keys that DID arrive go in the
+ *  log: evidence rather than a silent no-op. */
+function askAgentToCheckpoint(
+  inp: HookInput,
+  projectDir: string,
+  sid: string,
+  now: number,
+): string | null {
+  const cfg = loadConfig(projectDir);
+  const state = readState(projectDir, sid);
+  if (severity(state.mode) < severity(cfg.agents.inject_checkpoint_prompt_from)) return null;
+
+  const id = inp.agent_id ?? inp.agent_type ?? null;
+  if (!id) {
+    if (!state.latches.agents_asked) {
+      log(
+        projectDir,
+        'info',
+        `no agent identity on a PostToolUse at ${state.mode}; keys: ${Object.keys(inp).join(',')}`,
+      );
+      writeState(projectDir, { ...state, latches: { ...state.latches, agents_asked: [] } });
+    }
+    return null;
+  }
+
+  const asked = state.latches.agents_asked ?? [];
+  if (asked.includes(id)) return null;
+  writeState(projectDir, { ...state, latches: { ...state.latches, agents_asked: [...asked, id] } });
+
+  const notes = agentNotesFile(projectDir, inp.agent_type ?? id);
+  const rel = relative(projectDir, notes).split(sep).join('/') || notes;
+  log(projectDir, 'info', `asked in-flight agent ${id} to checkpoint into ${rel}`);
+  return (
+    `[Guardian: ${state.mode} — ${state.reason}] You are a subagent in a session that is ` +
+    `close to a wall, and you were started before that was true. Nothing can pause or ` +
+    `resume you: only what you write down survives. Before your next step, write to ` +
+    `\`${rel}\`: what you have established (with file paths), what you were doing, the next ` +
+    `concrete step, and what you ruled out. Then prefer returning a partial answer over ` +
+    `returning nothing.`
+  );
+}
+
 /** Observe a completed tool call. Runs as an async hook, so it may take a moment and can
  *  shell out to git without holding anything up. */
 function onPostToolUse(inp: HookInput, projectDir: string, sid: string, now: number): HookResult {
@@ -130,7 +190,7 @@ function onPostToolUse(inp: HookInput, projectDir: string, sid: string, now: num
   if (EDIT_TOOLS.has(tool)) {
     const p = editedPath(inp.tool_input);
     if (p) appendEvent(projectDir, sid, fileEvent(p, tool, now));
-    return autoSeal(projectDir, sid, now);
+    return withAgentAsk(autoSeal(projectDir, sid, now), inp, projectDir, sid, now);
   }
 
   const cmd =
@@ -164,7 +224,48 @@ function onPostToolUse(inp: HookInput, projectDir: string, sid: string, now: num
       }
     }
   }
-  return autoSeal(projectDir, sid, now);
+  return withAgentAsk(autoSeal(projectDir, sid, now), inp, projectDir, sid, now);
+}
+
+/** Merge the in-flight agent ask into whatever the seal path already had to say. A hook
+ *  answers with one JSON document, so two things to report is one merge, not two writes. */
+function withAgentAsk(
+  base: HookResult,
+  inp: HookInput,
+  projectDir: string,
+  sid: string,
+  now: number,
+): HookResult {
+  const ask = askAgentToCheckpoint(inp, projectDir, sid, now);
+  if (!ask) return base;
+  const out: HookOutput = base.stdout ? (JSON.parse(base.stdout) as HookOutput) : {};
+  return ok({
+    ...out,
+    hookSpecificOutput: {
+      ...(out.hookSpecificOutput ?? {}),
+      hookEventName: 'PostToolUse',
+      additionalContext: ask,
+    },
+  });
+}
+
+/** What to say about the sealed manifest's next action.
+ *
+ *  A stale one is worse than none: it reads as current, and the model that wrote it hours
+ *  ago has no reason to look at it again unless something says so. This is the sentence that
+ *  says so. */
+function nextActionAdvice(m: ReturnType<typeof buildManifest>): string {
+  const c = m.claude_supplied;
+  if (!c.next_action) {
+    return ' No next action is recorded yet — add one with `guardian note --next "..."`.';
+  }
+  const s = c.next_action_superseded;
+  if (!s) return '';
+  return (
+    ` The recorded next action is ${staleAge(m)} old and ${describeSuperseded(s)} came after ` +
+    'it, so the handoff is carrying a stale intent. Replace it now: ' +
+    '`guardian note --next "..."` then `/guardian handoff`.'
+  );
 }
 
 /** Seal without being asked, once the session is close enough to a wall.
@@ -213,7 +314,9 @@ function autoSeal(projectDir: string, sid: string, now: number): HookResult {
   writeState(projectDir, { ...latched, manifest: { sealed_at: m.sealed_at } });
 
   const n = m.observed.files_touched.length;
-  const flying = m.agents.filter((a) => a.status === 'IN_FLIGHT_AT_SEAL').length;
+  const inFlight = m.agents.filter((a) => a.status === 'IN_FLIGHT_AT_SEAL');
+  const flying = inFlight.length;
+  const silent = inFlight.filter((a) => !a.notes_recorded);
   log(
     projectDir,
     'info',
@@ -227,9 +330,12 @@ function autoSeal(projectDir: string, sid: string, now: number): HookResult {
       (flying
         ? ` ${flying} agent(s) were still running; the seal records them but does not pause them.`
         : '') +
-      (m.claude_supplied.next_action
-        ? ''
-        : ' No next action is recorded yet — add one with `guardian note --next "..."`.'),
+      (silent.length
+        ? ` ${silent.length} of them has written nothing down (` +
+          `${silent.map((a) => a.description ?? a.type).join('; ')}) — that work does not ` +
+          'survive. Let them return before you stop if you can.'
+        : '') +
+      nextActionAdvice(m),
   });
 }
 
@@ -303,7 +409,17 @@ function readDigest(projectDir: string): string | null {
 function onSessionEnd(inp: HookInput, projectDir: string, sid: string, now: number): HookResult {
   const state = readState(projectDir, sid);
   if (state.updated_at === 0 && state.samples.length === 0) return NOTHING;
-  seal(projectDir, sid, state, `SessionEnd (${inp.reason ?? 'other'})`, now, { git: false });
+  const m = buildManifest(projectDir, sid, state, `SessionEnd (${inp.reason ?? 'other'})`, now, {
+    git: false,
+  });
+  // A session that opened, watched its status line tick and exited has nothing to hand
+  // over. Sealing anyway put an empty manifest in history — twenty of those evict the real
+  // ones — and, until `writeSeal` learned to refuse, on offer as `latest`.
+  if (carriesNothing(m)) {
+    log(projectDir, 'info', `SessionEnd for ${sid}: nothing observed, no handoff sealed`);
+    return NOTHING;
+  }
+  writeSeal(projectDir, m);
   return NOTHING;
 }
 
@@ -328,9 +444,32 @@ function onUserPromptSubmit(projectDir: string, sid: string, now: number): HookR
   }
 
   const brief = injectionFor(state, cfg);
-  if (brief) parts.push(brief);
+  if (brief) parts.push(brief + intentStatus(projectDir, sid, state, now));
 
   return parts.length ? ok({ additionalContext: parts.join('\n\n') }) : NOTHING;
+}
+
+/** The state of this session's recorded intent, appended to a landing brief.
+ *
+ *  The brief says "record the next action" — advice a model reads as already done when it
+ *  wrote one hours ago, which is how a nine-hour session sealed at EMERGENCY carrying a note
+ *  from the previous day. So the brief now says which of the two situations it is in. */
+function intentStatus(
+  projectDir: string,
+  sid: string,
+  state: GuardianState,
+  now: number,
+): string {
+  if (severity(state.mode) < severity('LAND')) return '';
+  const st = nextActionStatus(projectDir, sid);
+  if (!st) return '\n\nGuardian has no next action recorded for this session yet.';
+  if (!st.superseded) return '';
+  return (
+    `\n\nNote: a next action IS recorded, written ${ageWords((now - st.at) / 60)} ago — ` +
+    `"${st.text.slice(0, 160)}${st.text.length > 160 ? '…' : ''}" — and ` +
+    `${describeSuperseded(st.superseded)} have been recorded since. It is stale. Write the ` +
+    'current one; do not assume the recorded note still holds.'
+  );
 }
 
 function resumeOffer(m: NonNullable<ReturnType<typeof hasUnconsumed>>, now: number): string {
@@ -342,11 +481,16 @@ function resumeOffer(m: NonNullable<ReturnType<typeof hasUnconsumed>>, now: numb
         ? `${(ageMin / 60).toFixed(1)} hours ago`
         : `${Math.round(ageMin / 60 / 24)} days ago`;
   const next = m.claude_supplied.next_action;
+  const stale = next ? m.claude_supplied.next_action_superseded : null;
   return (
     `[Guardian] An unfinished handoff from a previous session in this project was sealed ` +
     `${age}: "${m.seal_reason}".` +
     (m.objective ? ` Objective: ${m.objective}.` : '') +
     (next ? ` Next action recorded: ${next}` : '') +
+    (stale
+      ? ` — but that note was already ${staleAge(m)} old when the session sealed, and ` +
+        `${describeSuperseded(stale)} came after it. Do not act on it as written.`
+      : '') +
     `\nIf the user's request relates to that work, run \`/guardian resume\` to load the ` +
     `full digest and verify the workspace before editing. If it is unrelated, ignore this ` +
     `and do not mention it.`
@@ -371,12 +515,25 @@ function onStop(projectDir: string, sid: string, now: number): HookResult {
   // very refusal. So refuse while the one thing Guardian cannot observe is still missing,
   // and only for a manifest belonging to this session: a previous session's next action
   // says nothing about this one.
+  //
+  // And a next action that predates the work it was meant to describe is not one: a note
+  // written at hour one of a nine-hour session sealed unchanged into the handoff, reading
+  // as current. Guardian can see that later work landed after it, so it asks again.
   const sealed = readLatest(projectDir);
-  if (sealed && sealed.session.id === sid && sealed.claude_supplied.next_action) return NOTHING;
+  const mine = sealed && sealed.session.id === sid ? sealed : null;
+  const stale = mine?.claude_supplied.next_action ? mine.claude_supplied.next_action_superseded : null;
+  if (mine?.claude_supplied.next_action && !stale) return NOTHING;
 
   writeState(projectDir, { ...state, latches: { ...state.latches, stop_forced: true } });
   // Exit 2 prevents the stop and shows stderr to Claude.
-  return { stdout: '', exit: 2, stderr: forceSealInstruction(state) };
+  return {
+    stdout: '',
+    exit: 2,
+    stderr: forceSealInstruction(
+      state,
+      stale && mine ? { age: staleAge(mine), since: describeSuperseded(stale) } : null,
+    ),
+  };
 }
 
 /** Optional hard brake. Off by default. */

@@ -3,8 +3,8 @@ import { severity, fmtMin } from '../budget/mode.ts';
 import { readAgents, liveCount, typeStats } from '../sensors/agents.ts';
 import { appendEvent } from '../handoff/ledger.ts';
 import { redact, clip } from '../handoff/redact.ts';
-import { stateDir } from '../core/paths.ts';
-import { join, relative } from 'node:path';
+import { agentNotesFile } from '../core/paths.ts';
+import { relative } from 'node:path';
 
 const SPAWN_TOOLS = new Set(['Task', 'Agent']);
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
@@ -62,16 +62,6 @@ export function checkpointNote(state: GuardianState, notesDir: string): string {
   ].join('\n');
 }
 
-function slug(s: string): string {
-  return (
-    s
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '')
-      .slice(0, 40) || 'agent'
-  );
-}
-
 /** The spawn gate. The only synchronous hook Guardian installs, and it fires rarely. */
 export function gateSpawn(
   toolInput: Record<string, unknown> | undefined,
@@ -106,7 +96,7 @@ export function gateSpawn(
     if (prompt.includes('Budget note from Session Guardian')) return { decision: null };
 
     const desc = typeof toolInput.description === 'string' ? toolInput.description : 'agent';
-    const notesFile = join(stateDir(projectDir), 'agent-notes', `${slug(desc)}.md`);
+    const notesFile = agentNotesFile(projectDir, desc);
     const rel = relative(projectDir, notesFile).replace(/\\/g, '/') || notesFile;
 
     return {

@@ -12,11 +12,13 @@ import {
   readLatest,
   hasUnconsumed,
   markConsumed,
+  readBestHandoff,
   verify,
   renderDigest,
   latestDigestPath,
 } from '../src/handoff/manifest.ts';
 import { emptyState, readState, writeState } from '../src/core/state.ts';
+import { writeAgents, updateAgents, emptyAgents } from '../src/sensors/agents.ts';
 import { handle } from '../src/actuators/dispatch.ts';
 import { configPath } from '../src/core/paths.ts';
 import type { GuardianState } from '../src/types.ts';
@@ -436,4 +438,227 @@ test('a stated next action still wins outright', () => {
   const digest = renderDigest(buildManifest(dir, 'sess-A', stateWith(), 'manual', T, { git: false }), dir);
   assert.match(digest, /## Next action\nFinish rotateRefreshToken\(\)/);
   assert.doesNotMatch(digest, /NOT STATED/);
+});
+
+// ------------------------------------------------------------------ the stale next action
+
+test('a next action written before the work that followed it is sealed as stale', () => {
+  const dir = tmp();
+  // The shape that cost a real handoff: the note is written early in a long session, the
+  // session goes on working for hours, and the seal presents the note as current.
+  appendEvent(dir, 'sess-A', {
+    k: 'note',
+    t: T - 86_400,
+    field: 'next_action',
+    text: 'ONLY LANE K REMAINS — HEAD decdc74c0',
+  });
+  const f = join(dir, 'src', 'b.ts');
+  mkdirSync(join(dir, 'src'), { recursive: true });
+  writeFileSync(f, 'export const b = 2;');
+  appendEvent(dir, 'sess-A', { k: 'commit', t: T - 3600, sha: 'decdc74c0', subject: 'lane K' });
+  appendEvent(dir, 'sess-A', fileEvent(f, 'Edit', T - 1800));
+  const m = buildManifest(dir, 'sess-A', stateWith(), 'auto-seal (EMERGENCY)', T, { git: false });
+
+  assert.equal(m.claude_supplied.next_action_at, T - 86_400);
+  assert.deepEqual(m.claude_supplied.next_action_superseded, { commits: 1, files: 1 });
+
+  const digest = renderDigest(m, dir);
+  assert.match(digest, /## Next action — STALE/);
+  assert.match(digest, /1 commit and 1 file edit were recorded after it/);
+  assert.match(digest, /24\.0 hours before this seal/);
+  // The resume protocol has to agree with the section it points at.
+  assert.match(digest, /recorded next action is STALE/);
+});
+
+test('a next action written after the last of the work is not stale', () => {
+  const dir = tmp();
+  seedLedger(dir);
+  appendEvent(dir, 'sess-A', { k: 'note', t: T - 1, field: 'next_action', text: 'Extract the sensor' });
+  const m = buildManifest(dir, 'sess-A', stateWith(), 'manual', T, { git: false });
+  assert.equal(m.claude_supplied.next_action_superseded, null);
+  assert.match(renderDigest(m, dir), /## Next action\nExtract the sensor/);
+});
+
+// ------------------------------------------------------------------ what latest is allowed to hold
+
+test('a session that recorded nothing cannot displace a real handoff', () => {
+  const dir = tmp();
+  seedLedger(dir, 'real');
+  seal(dir, 'real', stateWith(), 'LAND: out of budget', T, { git: false });
+
+  // Two minutes later an unrelated session exits with an empty ledger. This used to be the
+  // whole failure: `latest` became 397 bytes, and the 108KB handoff beside it was invisible.
+  seal(dir, 'throwaway', stateWith(), 'SessionEnd (other)', T + 120, { git: false });
+
+  const latest = readLatest(dir)!;
+  assert.equal(latest.session.id, 'real');
+  assert.equal(latest.seal_reason, 'LAND: out of budget');
+  assert.equal(latest.observed.commits.length, 1);
+  // The empty seal is still archived: refusing to promote it is not refusing to record it.
+  const history = readdirSync(join(dir, '.claude', 'guardian', 'handoff', 'history'));
+  assert.equal(history.length, 2);
+  // And the digest on offer is the real one, not a rendering of the empty manifest.
+  assert.match(readFileSync(latestDigestPath(dir), 'utf8'), /wire it up/);
+});
+
+test('a session may always update its own handoff', () => {
+  const dir = tmp();
+  seal(dir, 'sess-A', stateWith(), 'first', T, { git: false });
+  seal(dir, 'sess-A', stateWith(), 'second', T + 60, { git: false });
+  assert.equal(readLatest(dir)!.seal_reason, 'second');
+});
+
+test('a real handoff still loses to a newer real one', () => {
+  const dir = tmp();
+  seedLedger(dir, 'old');
+  seal(dir, 'old', stateWith(), 'older work', T, { git: false });
+  seedLedger(dir, 'new');
+  seal(dir, 'new', stateWith(), 'newer work', T + 120, { git: false });
+  assert.equal(readLatest(dir)!.session.id, 'new', 'recency decides between two real handoffs');
+});
+
+test('the real handoff is read back out of history when latest holds an empty one', () => {
+  const dir = tmp();
+  seedLedger(dir, 'real');
+  seal(dir, 'real', stateWith(), 'LAND: out of budget', T, { git: false });
+  // Reproduce a clobber that already happened — every project carrying one today.
+  const empty = buildManifest(dir, 'throwaway', stateWith(), 'SessionEnd (other)', T + 120, {
+    git: false,
+  });
+  writeFileSync(join(dir, '.claude', 'guardian', 'handoff', 'latest.json'), JSON.stringify(empty));
+  writeFileSync(latestDigestPath(dir), '# Guardian handoff\n\nnothing\n');
+
+  const ref = readBestHandoff(dir)!;
+  assert.equal(ref.rescued, true);
+  assert.equal(ref.manifest.session.id, 'real');
+  assert.match(ref.path, /history/);
+
+  // The resume offer has to see it too, or nothing ever points at the real one.
+  assert.equal(hasUnconsumed(dir)!.session.id, 'real');
+
+  // Consuming it promotes it back, so the next reader does not have to go looking.
+  markConsumed(dir, T + 300);
+  assert.equal(readLatest(dir)!.session.id, 'real');
+  assert.equal(readLatest(dir)!.consumed_at, T + 300);
+  assert.match(readFileSync(latestDigestPath(dir), 'utf8'), /wire it up/);
+  assert.equal(hasUnconsumed(dir), null, 'and it is not offered twice');
+});
+
+test('a handoff consumed from latest is not re-offered from its history twin', () => {
+  const dir = tmp();
+  seedLedger(dir, 'real');
+  seal(dir, 'real', stateWith(), 'LAND', T, { git: false });
+  markConsumed(dir, T + 10);
+  // Whatever happens to `latest` afterwards, the archive copy knows it was read.
+  writeFileSync(
+    join(dir, '.claude', 'guardian', 'handoff', 'latest.json'),
+    JSON.stringify(buildManifest(dir, 'throwaway', stateWith(), 'SessionEnd', T + 120, { git: false })),
+  );
+  assert.equal(hasUnconsumed(dir), null);
+});
+
+test('pruning never drops the handoff that is on offer', () => {
+  const dir = tmp();
+  seedLedger(dir, 'real');
+  seal(dir, 'real', stateWith(), 'the one that matters', T, { git: false });
+  // A burst of short sessions that each observed nothing. None can take `latest`, and
+  // twenty of them used to push the real handoff out of history while `latest` still
+  // pointed at it — losing the only copy of the thing on offer.
+  for (let i = 0; i < 24; i++) {
+    seal(dir, `s${i}`, stateWith(), `seal ${i}`, T + 60 + i * 60, { git: false });
+  }
+  assert.equal(readLatest(dir)!.session.id, 'real');
+  const kept = readdirSync(join(dir, '.claude', 'guardian', 'handoff', 'history'));
+  assert.equal(kept.length, 21, 'KEEP, plus whatever latest points at');
+  assert.ok(
+    kept.includes(`${new Date(T * 1000).toISOString().replace(/[:.]/g, '-')}.json`),
+    'the archive copy of the handoff on offer survives however old it is',
+  );
+});
+
+// ------------------------------------------------------------------ per-agent handoff
+
+test('each running agent is handed over on its own terms, not just counted', () => {
+  const dir = tmp();
+  // The ledger knows an agent started. The live registry knows what it was asked to do,
+  // how long it has been at it and how full its own context is — and that is the part a
+  // resuming session can act on.
+  appendEvent(dir, 'sess-A', { k: 'agent', t: T - 2400, id: 'ag2', type: 'general-purpose', status: 'start' });
+  writeAgents(
+    dir,
+    updateAgents(
+      emptyAgents('sess-A'),
+      [
+        {
+          id: 'ag2',
+          type: 'general-purpose',
+          description: 'Port the sensor tests to the new fixture',
+          startTime: (T - 2400) * 1000,
+          tokenCount: 120_000,
+          contextWindowSize: 200_000,
+        },
+      ],
+      T - 10,
+    ),
+  );
+  const notes = join(dir, '.claude', 'guardian', 'agent-notes');
+  mkdirSync(notes, { recursive: true });
+  writeFileSync(join(notes, 'port-the-sensor-tests-to-the-new-fixture.md'), 'Established: fixture lives in test/helpers.ts');
+
+  const m = buildManifest(dir, 'sess-A', stateWith(), 'auto-seal (LAND)', T, { git: false });
+  const a = m.agents.find((x) => x.id === 'ag2')!;
+  assert.equal(a.status, 'IN_FLIGHT_AT_SEAL');
+  assert.equal(a.description, 'Port the sensor tests to the new fixture');
+  assert.equal(Math.round(a.elapsed_min!), 40);
+  assert.equal(Math.round(a.context_pct!), 60);
+  assert.equal(a.notes_recorded, true, 'the notes path must be derived the same way the gate derived it');
+  assert.match(a.notes_file!, /agent-notes\/port-the-sensor-tests-to-the-new-fixture\.md/);
+
+  const digest = renderDigest(m, dir);
+  assert.match(digest, /STILL RUNNING AT SEAL/);
+  assert.match(digest, /asked to: Port the sensor tests to the new fixture/);
+  assert.match(digest, /its own context 60%/);
+  assert.match(digest, /notes: .*port-the-sensor-tests/);
+});
+
+test('an in-flight agent that wrote nothing down is called out, in the protocol too', () => {
+  const dir = tmp();
+  writeAgents(
+    dir,
+    updateAgents(
+      emptyAgents('sess-A'),
+      [{ id: 'ag9', type: 'general-purpose', description: 'Refactor the token bucket', startTime: (T - 900) * 1000 }],
+      T - 5,
+    ),
+  );
+  const m = buildManifest(dir, 'sess-A', stateWith(), 'auto-seal (EMERGENCY)', T, { git: false });
+  const a = m.agents.find((x) => x.id === 'ag9')!;
+  assert.equal(a.notes_recorded, false);
+  assert.equal(a.status, 'IN_FLIGHT_AT_SEAL');
+
+  const digest = renderDigest(m, dir);
+  assert.match(digest, /nothing written down/);
+  assert.match(digest, /1 agent\(s\) were still running with nothing written down/);
+  // The unstated-next-action fallback has to name it too: it is the most consequential
+  // thing in flight, and "agent was running" alone is not actionable.
+  assert.match(digest, /asked to: Refactor the token bucket/);
+});
+
+test('an agent the registry never saw still travels on what the ledger knows', () => {
+  const dir = tmp();
+  appendEvent(dir, 'sess-A', { k: 'agent', t: T - 60, id: 'ag1', type: 'Explore', status: 'start' });
+  appendEvent(dir, 'sess-A', {
+    k: 'agent',
+    t: T - 20,
+    id: 'ag1',
+    type: 'Explore',
+    status: 'stop',
+    summary: 'found three call sites',
+  });
+  const m = buildManifest(dir, 'sess-A', stateWith(), 'r', T, { git: false });
+  const a = m.agents[0]!;
+  assert.equal(a.status, 'RETURNED');
+  assert.equal(a.redo_cost_estimate, 'low');
+  assert.equal(a.description, null, 'absent is absent; a manifest never invents a field');
+  assert.doesNotMatch(renderDigest(m, dir), /nothing written down/, 'a returned agent lost nothing');
 });

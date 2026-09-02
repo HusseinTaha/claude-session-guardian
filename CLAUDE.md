@@ -79,6 +79,30 @@ covered `git add -A` being killed at a 10s cap on a working tree that needs 21.7
 `spawnSync` reports a kill through `error` rather than a throw. Anything that shells out
 keeps both stderr and the spawn error, and a degraded path names the cause, not the step.
 
+**`latest` is one file for a whole project, and every session seals on the way out.** So the
+last session to exit won it regardless of whether it did anything: a session that opened and
+closed wrote 397 bytes over a 108KB handoff two minutes after it landed, and `/guardian
+resume` then offered a manifest with no files, no commits and no next action. A seal that
+records nothing never displaces one that records something (`carriesNothing`), history keeps
+every seal either way, pruning never drops what `latest` points at, and the read path
+(`readBestHandoff`) looks past a clobber that already happened.
+
+**A next action has a shelf life; nothing else in the manifest does.** Files and commits are
+observations and stay true. Intent describes a moment, and a nine-hour session that wrote its
+note in hour one sealed "ONLY LANE K REMAINS" over twelve lanes that had since run. The note
+carries `next_action_at`, anything later is counted (`next_action_superseded`), and every
+surface that shows a next action says when it is spent — including the Stop brake, which
+treats a superseded note as no note, and the landing brief, which otherwise reads as advice
+the model already took.
+
+**Each running agent is its own handoff.** The manifest used to say "agent ag2 was running"
+and nothing actionable. It now carries what each was asked to do, how long it had been at it,
+how full its own context was, and whether its notes file has anything in it — because an
+in-flight agent that wrote nothing down is the only part of a session that cannot be
+recovered from disk. The spawn gate can only reach agents born after the climb; agents
+already running are asked through their own tool calls, and when a payload carries nothing
+identifying one, the keys that did arrive go in the log.
+
 **Burn defaults are calibrated, not chosen.** `scripts/calibrate.ts` replays real transcripts
 from `~/.claude/projects`. Changing `burn.*` means re-running it, not reasoning about it.
 
