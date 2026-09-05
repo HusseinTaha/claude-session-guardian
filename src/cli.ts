@@ -1,4 +1,5 @@
 import { readFileSync, existsSync } from 'node:fs';
+import { VERSION } from './version.ts';
 import { sense } from './sensors/statusline.ts';
 import { senseAgents } from './sensors/subagents.ts';
 import { install, init, uninstall, findGuardianSettings, guardianCommand } from './ui/install.ts';
@@ -48,12 +49,59 @@ import { configPath } from './core/paths.ts';
 import { DEFAULT_CONFIG } from './core/config.ts';
 import { fmtMin, fmtElapsed } from './budget/mode.ts';
 
+/** The commands Claude Code hands a payload to on stdin. Everything else never reads it,
+ *  so it must not pay for the wait either. */
+const STDIN_COMMANDS = new Set(['sense', 'sense-agents', 'hook']);
+
+/** How long to wait for that payload before deciding there is not going to be one. */
+const STDIN_TIMEOUT_MS = Number(process.env.GUARDIAN_STDIN_TIMEOUT_MS) || 2000;
+
+let capturedStdin = '';
+
 function readStdin(): string {
-  try {
-    return readFileSync(0, 'utf8');
-  } catch {
-    return '';
-  }
+  return capturedStdin;
+}
+
+/** Read stdin with a deadline, because `readFileSync(0)` returns only at EOF.
+ *
+ *  Claude Code closes the pipe. A shell wrapper between us and it does not always: these
+ *  are invoked as `bash -c \"node guardian.cjs sense\"`, and when the session that started
+ *  that bash goes away the descriptor can stay open with nobody left to close it. The read
+ *  then never returns and the process lives forever — measured on this machine at seven
+ *  strays, the oldest 36 hours old, each holding ~29MB.
+ *
+ *  A watchdog that outlives what it was watching is the one thing it must not do. */
+function captureStdin(timeoutMs: number): Promise<string> {
+  if (process.stdin.isTTY) return Promise.resolve('');
+  return new Promise((resolve) => {
+    let buf = '';
+    let settled = false;
+    const done = (): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try {
+        process.stdin.pause();
+        // Do not let an un-EOF'd pipe hold the event loop open once we have stopped caring.
+        process.stdin.unref();
+      } catch {
+        /* ignore */
+      }
+      resolve(buf);
+    };
+    const timer = setTimeout(done, timeoutMs);
+    try {
+      process.stdin.setEncoding('utf8');
+      process.stdin.on('data', (d: string) => {
+        buf += d;
+      });
+      process.stdin.on('end', done);
+      process.stdin.on('error', done);
+      process.stdin.resume();
+    } catch {
+      done();
+    }
+  });
 }
 
 function now(): number {
@@ -719,7 +767,7 @@ function main(argv: string[]): number {
       return 0;
 
     case 'version':
-      out('0.5.0\n');
+      out(`${VERSION}\n`);
       return 0;
 
     default:
@@ -731,8 +779,19 @@ function main(argv: string[]): number {
 // A watchdog that crashes the thing it is watching is worse than no watchdog. Every path
 // out of this process is exit 0 with usable stdout, unless the user asked for a command
 // that does not exist.
-try {
-  process.exitCode = main(process.argv.slice(2));
-} catch {
-  process.exitCode = 0;
-}
+const wanted = STDIN_COMMANDS.has(process.argv[2] ?? '')
+  ? captureStdin(STDIN_TIMEOUT_MS)
+  : Promise.resolve('');
+
+void wanted
+  .then((payload) => {
+    capturedStdin = payload;
+    try {
+      process.exitCode = main(process.argv.slice(2));
+    } catch {
+      process.exitCode = 0;
+    }
+  })
+  .catch(() => {
+    process.exitCode = 0;
+  });

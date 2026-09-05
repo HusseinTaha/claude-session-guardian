@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.7.2
+
+A watchdog that outlived the session it was watching.
+
+- **`readFileSync(0)` never returns when nothing ever closes stdin.** Claude Code closes
+  the pipe; a shell wrapper between us and it does not always, and these run as
+  `bash -c "node guardian.cjs sense"`. When the session that started that bash goes away,
+  the descriptor can stay open with nobody left to close it — the read waits forever and
+  the process never exits. Found on a machine holding seven strays, the oldest 36 hours
+  old. Stdin is now read with a deadline (`GUARDIAN_STDIN_TIMEOUT_MS`, default 2000), and
+  only for the three commands that are handed a payload; an empty read was already a
+  supported input, since every one of them falls back to cwd. A run with stdin held open
+  now exits on its own, and a payload that does arrive is still read in full — both pinned
+  in `test/cli.test.ts`.
+- **`guardian version` had drifted two minors.** It carried its own string literal and
+  answered `0.5.0` while `package.json` and the plugin manifest both said `0.7.1`. The
+  number now lives in `src/version.ts`, and `test/version.test.ts` pins it against both
+  manifests, because a number nobody compares is how three of them end up disagreeing.
+
 ## 0.7.1
 
 The status line, under the load it was built for.

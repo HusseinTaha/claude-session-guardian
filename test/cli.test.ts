@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -225,4 +225,33 @@ test('the agents table lines up, and carries absolute context alongside the perc
   assert.equal(new Set(offsets).size, 1, `percent column ragged: ${JSON.stringify(lines)}`);
   const headerFull = lines[0]!.indexOf('FULL');
   assert.ok(headerFull > 0 && lines.slice(1).every((l) => l.length >= headerFull));
+});
+
+// A watchdog that outlives the thing it was watching is the one failure it cannot have.
+// `readFileSync(0)` returns only at EOF, and these run as `bash -c "node guardian.cjs
+// sense"` — when the session that started that bash goes away the descriptor can stay
+// open with nobody left to close it. Seven strays were found on one machine, the oldest
+// 36 hours old. Nothing writes to this child's stdin and nothing ever ends it.
+test('a stdin that never closes does not strand the process', async () => {
+  const child = spawn(process.execPath, [BUNDLE, 'sense'], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, GUARDIAN_STDIN_TIMEOUT_MS: '300' },
+    windowsHide: true,
+  });
+  const exited = await new Promise<boolean>((resolve) => {
+    const t = setTimeout(() => resolve(false), 15000);
+    child.on('exit', () => {
+      clearTimeout(t);
+      resolve(true);
+    });
+  });
+  if (!exited) child.kill('SIGKILL');
+  assert.ok(exited, 'guardian sense was still running with stdin held open');
+});
+
+// The other half of the contract: bounding the read must not lose a payload that arrives.
+test('a payload delivered on stdin is still read in full', () => {
+  const r = run(['sense'], JSON.stringify({ workspace: { current_dir: process.cwd() } }));
+  assert.equal(r.status, 0);
+  assert.ok(r.stdout.length > 0, 'sense produced no bar for a valid payload');
 });
