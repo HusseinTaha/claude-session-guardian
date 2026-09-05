@@ -9,6 +9,7 @@ import {
   realpathSync,
 } from 'node:fs';
 import { spawnSync } from 'node:child_process';
+import { spawnWithStdinFile } from '../core/spawn.ts';
 import { tmpdir } from 'node:os';
 import { join, dirname, relative } from 'node:path';
 import type { GuardianState } from '../types.ts';
@@ -575,13 +576,14 @@ export function coldResume(
     // the prompt on its spaces and delivered `-p` the single word "Read". The cold session
     // then answered the question "Read", and every check downstream scored that answer as
     // though the handoff had been read. Single-token flags are safe to pass as argv.
-    const run = spawnSync('claude', ['-p', '--allowedTools', 'Read'], {
+    // `shell` is required for the .cmd shim above, and it is also what stopped `timeout`
+    // from reaching claude itself: the cap killed cmd.exe while Node kept waiting on the
+    // pipe held for its child. The prompt goes over a descriptor now, so the cap holds.
+    const run = spawnWithStdinFile('claude', ['-p', '--allowedTools', 'Read'], COLD_PROMPT, {
       cwd: dir,
-      input: COLD_PROMPT,
-      encoding: 'utf8',
-      timeout: opts.timeoutMs ?? 240_000,
-      windowsHide: true,
+      timeoutMs: opts.timeoutMs ?? 240_000,
       shell: process.platform === 'win32',
+      payloadDir: wt,
     });
     if (run.error || run.status !== 0) {
       return {

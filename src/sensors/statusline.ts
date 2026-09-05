@@ -1,9 +1,10 @@
-import { spawnSync, type SpawnSyncReturns } from 'node:child_process';
-import { readFileSync, writeFileSync, renameSync, openSync, closeSync, unlinkSync } from 'node:fs';
+import { type SpawnSyncReturns } from 'node:child_process';
+import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { AXES, type AxisName, type AxisState, type GuardianConfig, type GuardianState, type Sample, type StatusLinePayload } from '../types.ts';
 import { loadConfig } from '../core/config.ts';
 import { join, dirname } from 'node:path';
 import { resolveStateRoot, stateDir, ensureGuardianDir } from '../core/paths.ts';
+import { spawnWithStdinFile } from '../core/spawn.ts';
 import { readState, writeState } from '../core/state.ts';
 import { recordSample, rawBurnRate, smooth } from '../budget/burn.ts';
 import { axisMode, decide, timeToWall, severity } from '../budget/mode.ts';
@@ -161,38 +162,20 @@ function spawnChained(
   cfg: GuardianConfig,
   env: Record<string, string | undefined>,
 ): SpawnSyncReturns<string> {
-  const base = {
-    shell: true,
-    encoding: 'utf8' as const,
-    timeout: Math.max(100, cfg.statusline.chain_timeout_ms),
-    windowsHide: true,
-    env,
-  };
-  const p = join(stateDir(projectDir), `chain-stdin.${process.pid}.json`);
-  let fd: number | null = null;
+  // The payload goes in Guardian's own state directory rather than the OS temp dir, so it
+  // lands somewhere already ignored. ensureGuardianDir writes that .gitignore.
+  const dir = stateDir(projectDir);
   try {
-    ensureGuardianDir(projectDir, dirname(p));
-    writeFileSync(p, stdin);
-    fd = openSync(p, 'r');
-    return spawnSync(cmd, { ...base, stdio: [fd, 'pipe', 'pipe'] });
+    ensureGuardianDir(projectDir, dir);
   } catch {
-    // Nowhere to put the payload: the pipe still delivers it, the cap just cannot be
-    // trusted. A bar that runs is worth more than one that is punctual.
-    return spawnSync(cmd, { ...base, input: stdin });
-  } finally {
-    if (fd !== null) {
-      try {
-        closeSync(fd);
-      } catch {
-        /* ignore */
-      }
-    }
-    try {
-      unlinkSync(p);
-    } catch {
-      /* ignore */
-    }
+    // spawnWithStdinFile falls back to a pipe if the directory is unusable.
   }
+  return spawnWithStdinFile(cmd, null, stdin, {
+    timeoutMs: cfg.statusline.chain_timeout_ms,
+    shell: true,
+    env,
+    payloadDir: dir,
+  });
 }
 
 /** Where the last bar the chained command actually produced is kept. */

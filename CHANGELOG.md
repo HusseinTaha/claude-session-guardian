@@ -14,6 +14,14 @@ A watchdog that outlived the session it was watching.
   supported input, since every one of them falls back to cwd. A run with stdin held open
   now exits on its own, and a payload that does arrive is still read in full — both pinned
   in `test/cli.test.ts`.
+- **`doctor`'s cold session had the same uncapped timeout the status line was fixed for.**
+  `claude` is a `.cmd` shim on Windows, so that spawn needs a shell — and a shell is exactly
+  what stops `timeout` from reaching the process doing the work: the 240s cap killed a
+  `cmd.exe` that had already handed off, while Node went on waiting on the pipe held for its
+  child. The bounded-stdin spawn is now one helper, `src/core/spawn.ts`, used by both the
+  chained bar and the cold session, so the next caller inherits the fix instead of the bug.
+  `test/spawn.test.ts` pins both halves: the cap holds against a child that ignores it, and
+  a payload on the descriptor still arrives intact.
 - **`guardian version` had drifted two minors.** It carried its own string literal and
   answered `0.5.0` while `package.json` and the plugin manifest both said `0.7.1`. The
   number now lives in `src/version.ts`, and `test/version.test.ts` pins it against both
