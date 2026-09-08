@@ -78,17 +78,23 @@ test('the sweep takes residue past every cap and leaves live payloads alone', ()
   const dir = mkdtempSync(join(tmpdir(), 'guardian-sweep-'));
   try {
     const stale = join(dir, 'stdin.999999.1.txt');
+    // The name the status line wrote before 0.7.2 unified the helper. 2546 of these were
+    // still in one project's state directory: matching only the current name is how a sweep
+    // reports success while stepping over the pile it exists to clear.
+    const olderName = join(dir, 'chain-stdin.999999.json');
     const live = join(dir, 'stdin.777777.2.txt');
     // The default payload directory is the OS temp dir, which belongs to everybody, so the
     // sweep must go by name as well as age. Anything else in there is not ours to delete.
     const foreign = join(dir, 'someone-elses-cache.txt');
-    for (const f of [stale, live, foreign]) writeFileSync(f, '{}');
+    for (const f of [stale, olderName, live, foreign]) writeFileSync(f, '{}');
     const old = new Date(Date.now() - 60 * 60 * 1000);
     utimesSync(stale, old, old);
+    utimesSync(olderName, old, old);
     utimesSync(foreign, old, old);
 
-    assert.equal(sweepPayloadResidue(dir), 1);
+    assert.equal(sweepPayloadResidue(dir), 2);
     assert.equal(existsSync(stale), false);
+    assert.equal(existsSync(olderName), false, 'a renamed payload is not a fixed leak');
     // Several sessions spawn concurrently; deleting a sibling's payload mid-read would feed
     // it an empty stdin, which is worse than the leak it fixes.
     assert.equal(existsSync(live), true);

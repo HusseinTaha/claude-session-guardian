@@ -22,12 +22,18 @@ export interface StdinSpawn {
   payloadDir?: string;
 }
 
-/** The payload filename, and the only thing the sweep below will delete.
+/** Every payload name this tool has ever written, and the only things the sweep will delete.
  *
  *  A pattern rather than an age alone, because the default payload directory is the OS temp
  *  dir, which belongs to everybody. Age-only is safe in a directory a tool owns outright;
- *  here it would delete other people's files. */
-const PAYLOAD_NAME = /^stdin\.\d+\.\d+\.txt$/;
+ *  here it would delete other people's files.
+ *
+ *  Which makes this list the price of that safety, and it has to hold the OLD names too:
+ *  `chain-stdin.<pid>.json` is what the status line wrote before 0.7.2 unified the helper,
+ *  and 2546 of them were still sitting in one project's state directory — residue a
+ *  name-matching sweep silently steps over while reporting success. A renamed payload is
+ *  not a fixed leak. Anything added below stays below. */
+const PAYLOAD_NAMES = [/^stdin\.\d+\.\d+\.txt$/, /^chain-stdin\.\d+\.json$/];
 
 /**
  * How old a payload has to be before it is certainly residue rather than in use.
@@ -59,7 +65,7 @@ export function sweepPayloadResidue(dir: string, limit = RESIDUE_SWEEP_LIMIT): n
   try {
     for (const name of readdirSync(dir)) {
       if (removed >= limit) break;
-      if (!PAYLOAD_NAME.test(name)) continue;
+      if (!PAYLOAD_NAMES.some((re) => re.test(name))) continue;
       const f = join(dir, name);
       try {
         if (statSync(f).mtimeMs < cutoff) {
