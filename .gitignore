@@ -1,10 +1,17 @@
 node_modules/
-dist/
+# Root bundle only: build/plugin/dist is the staged payload and IS tracked, so this
+# pattern must not match at every depth the way a bare `dist/` would.
+/dist/
 *.log
-.claude/guardian/
+.claude/
+.mcp.json
 
 # graft's local graph cache — regenerable, not committed (run `graft build`).
 graft/
 
-# Staged plugin payload — built by `npm run stage-plugin`, never edited by hand.
-build/
+# Staged plugin payload — built by `npm run stage-plugin`, never edited by hand, but
+# tracked: the marketplace root is this repo and its manifest points at build/plugin,
+# so a clone that lacks it cannot install the plugin. `npm run check` restages it, which
+# means drift shows up as a dirty tree rather than as a broken install.
+build/*
+!build/plugin/

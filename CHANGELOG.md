@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.7.6
+
+The plugin could be installed from nowhere.
+
+- **`build/plugin` is the marketplace source, and it was gitignored.** The manifest sits at
+  the marketplace root and points at `./build/plugin`, which is built rather than committed
+  — so a clone had every part of the plugin except the one directory the manifest names.
+  Measured, against the published repo: `marketplace add` succeeds, because validation reads
+  `marketplace.json` and never checks that its source resolves, and then `plugin install`
+  fails with `Source path does not exist`. The npm package failed the same way for the same
+  reason. The staged tree is now tracked, and `dist/` is scoped to the root so the pattern
+  stops matching the copy inside it. It is still never edited by hand: `npm run check`
+  restages it, so drift shows up as a dirty tree rather than as a broken install.
+- **The payload carried a marketplace manifest that pointed at itself.** `stage-plugin`
+  copied `.claude-plugin` whole, so the staged plugin shipped a `marketplace.json` naming
+  `./build/plugin` one level below where that path can exist. Only `plugin.json` travels now.
+- **The documented install was four steps and is one.** Verified end to end against a
+  throwaway `CLAUDE_CONFIG_DIR`: the plugin installs with exactly the seven payload entries
+  and no `src/`, `test/`, `scripts/`, `docs/` or `.mcp.json`. The README also now says to use
+  the full HTTPS URL — the `owner/repo` shorthand resolves to SSH and fails without keys.
+
 ## 0.7.5
 
 Verified on Linux, which turned up one test that could never finish there.

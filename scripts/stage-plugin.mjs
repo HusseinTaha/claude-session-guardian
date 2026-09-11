@@ -23,7 +23,18 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const out = join(root, 'build', 'plugin');
 
 /** Everything the plugin manifest references, and nothing that merely happens to be here. */
-const PAYLOAD = ['.claude-plugin', 'commands', 'hooks', 'skills', 'dist', 'README.md', 'LICENSE'];
+const PAYLOAD = [
+  // Only the plugin manifest, never the marketplace one: marketplace.json belongs at the
+  // marketplace root and points *here*, so a copy inside the payload is self-referential
+  // and names a path that cannot exist at this level.
+  '.claude-plugin/plugin.json',
+  'commands',
+  'hooks',
+  'skills',
+  'dist',
+  'README.md',
+  'LICENSE',
+];
 
 if (!existsSync(join(root, 'dist', 'guardian.cjs'))) {
   console.error('no dist/guardian.cjs — run `npm run build` first');

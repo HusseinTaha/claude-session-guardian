@@ -1,6 +1,6 @@
 {
   "name": "claude-session-guardian",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "author": "Hussein Taha",
   "repository": {
     "type": "git",
@@ -19,6 +19,7 @@
   },
   "files": [
     ".claude-plugin/",
+    "build/plugin/",
     "CHANGELOG.md",
     "README.md",
     "commands/",

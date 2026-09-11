@@ -37,11 +37,9 @@ Guardian is two halves, and a full install wants both.
 npm install -g claude-session-guardian   # puts `guardian` on PATH, everywhere
 guardian install                        # wires the status line into ~/.claude/settings.json
 
-# the plugin half needs the repo: build/plugin is staged, never committed
-git clone https://github.com/HusseinTaha/claude-session-guardian.git
-cd claude-session-guardian && npm install
-npm run stage-plugin        # stages build/plugin: exactly the plugin payload, nothing else
-claude plugin marketplace add .
+# the plugin half, straight from the repo (full HTTPS URL: the owner/repo
+# shorthand resolves to SSH and fails without keys)
+claude plugin marketplace add https://github.com/HusseinTaha/claude-session-guardian.git
 claude plugin install claude-session-guardian@claude-session-guardian
 ```
 
