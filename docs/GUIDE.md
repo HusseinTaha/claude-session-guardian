@@ -1262,7 +1262,7 @@ import upward", the dependency is inverted and the check will say so.
 npm run check         # typecheck + layers + build + stage-plugin + tests
 npm run layers        # just the architecture check
 npm run perf          # hot-path latency: sense() runs on every session event
-npm test              # 204 tests
+npm test              # 269 tests
 npm run stage-plugin  # build/plugin — the plugin payload, listed explicitly
 ```
 
@@ -1275,6 +1275,10 @@ a checkout installs the whole checkout — and Claude Code reads what it finds t
 `.mcp.json` kept for local development becomes an MCP server the plugin declares, enabled in
 every project of everyone who installs it. `stage-plugin.mjs` copies an explicit list into
 `build/plugin/`; anything new the manifest references has to be added to that list.
+
+That tree is committed, unlike the root `dist/`. The marketplace root is the repo, so a clone
+without the staged payload cannot install the plugin — and it fails late and quietly, since
+`marketplace add` validates the manifest without checking that its source resolves.
 
 `GUARDIAN_NOW=<epoch>` replays a session at its original timestamps, which is how the mode
 ladder is demonstrated and how `doctor --cold` reproduces a handoff.

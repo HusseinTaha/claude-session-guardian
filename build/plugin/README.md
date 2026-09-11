@@ -7,7 +7,7 @@ and lands the session before it hits.
 > ledger, handoff manifest, lossless compaction, verified resume, git checkpoints; per-agent
 > sensing, the spawn gate, self-checkpointing subagents; tiered injection, the Stop brake,
 > 429 recovery; a validated config CLI, the `doctor` self-check with a cold-resume harness,
-> and an optional three-tool MCP server. 204 tests.
+> and an optional three-tool MCP server. 269 tests.
 >
 > **[Full user guide with examples →](docs/GUIDE.md)**
 
@@ -397,7 +397,7 @@ it holds prompts and paths and does not belong in a commit.
 ## Development
 
 ```bash
-npm run check      # typecheck + layer check + build + 204 tests
+npm run check      # typecheck + layer check + build + 269 tests
 npm run layers     # assert imports only point downward
 ```
 

@@ -33,10 +33,24 @@ not read the user file — that mistake made `doctor` report a confident false p
 **Never write Guardian's command into a shared settings file.** It carries an absolute path
 to one machine's bundle. `init` overrides from `settings.local.json` instead.
 
-**The plugin ships `build/plugin`, not the repo.** A marketplace source pointed at a working
-directory installs everything in it, `.mcp.json` included, and Claude Code enables what it
-finds. Run `npm run stage-plugin` (part of `npm run check`) and add new payload entries to
-its explicit list.
+**The plugin ships `build/plugin`, not the repo — and that directory is committed.** A
+marketplace source pointed at a working directory installs everything in it, `.mcp.json`
+included, and Claude Code enables what it finds, so the manifest points at a staged tree
+instead. But the marketplace root is this repo, which means a clone without that tree cannot
+install the plugin at all, and nothing says so: `marketplace add` succeeds, because
+validation reads `marketplace.json` and never checks that its source resolves, and only
+`plugin install` fails, with `Source path does not exist`. It shipped that way for four
+versions and was found by installing the published repo rather than reading it. So the
+staged payload is tracked, `/dist/` is root-scoped because a bare `dist/` matches at every
+depth and was silently ignoring the copy inside it, and `npm run check` restages — drift is a
+dirty tree, not a broken install. Add new payload entries to the explicit list in
+`stage-plugin.mjs`.
+
+**The published bundle exists once, and `bin` points at the staged copy.** The payload has to
+contain `dist/guardian.cjs`, so shipping the root one beside it put the same 157KB in the
+tarball twice — 314KB of 424KB. `bin` therefore reaches into `build/plugin`, which reads
+oddly in `package.json` and is the reason the package is 248KB: the CLI is one more entry
+point into the payload, not a second copy of it.
 
 **Substitution happens at a layer you did not pick.** `${VAR:-default}` looks like it
 handles the empty case and does not: whoever expands it first wins, and that is never the
