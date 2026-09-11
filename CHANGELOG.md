@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.7.4
+
+Documentation. 0.7.3 shipped install instructions for a clone that no longer has to exist.
+
+- **The registry page told people to build from source.** `npm install && npm run build &&
+  npm install -g .` is the contributor's path, and it was the first thing anyone landing on
+  the package saw. The binary now installs in one line. The plugin half still wants the
+  repo, and the reason is deliberate rather than an oversight worth hiding: `build/` is
+  gitignored so a marketplace source can never pick up whatever else is sitting in the
+  working directory, which means the staged payload exists only once `stage-plugin` has
+  run. The README says so now instead of leaving it as an inconvenience, and `docs/GUIDE.md`
+  no longer carries a literal `<this repo>` where the clone URL belongs.
+- No behaviour changed. Every source file is untouched since 0.7.3; the only difference in
+  `dist/guardian.cjs` is the version string it reports.
+
 ## 0.7.3
 
 A renamed payload is not a fixed leak.
