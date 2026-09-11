@@ -66,9 +66,13 @@ test('sense writes state and prints a bar for a real payload', () => {
 
 test('an unreadable state directory does not take the status line down', () => {
   // Point the project at a path that cannot be created, so writeState throws.
+  //
+  // Not a path under /proc: `mkdirSync(recursive)` never returns on procfs on Linux —
+  // measured, it spins on CPU rather than throwing, and took the whole suite with it.
+  // A path whose parent is a file fails with ENOTDIR everywhere and returns at once.
   const payload = JSON.stringify({
     session_id: 'cli-2',
-    workspace: { project_dir: process.platform === 'win32' ? 'Z:/nope/nope' : '/proc/nope' },
+    workspace: { project_dir: process.platform === 'win32' ? 'Z:/nope/nope' : '/dev/null/nope' },
     context_window: { used_percentage: 50 },
   });
   const r = run(['sense'], payload);
