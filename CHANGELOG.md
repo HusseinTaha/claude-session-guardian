@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.8
+
+Documentation, so the registry page stops undercounting the suite.
+
+- **The README advertised 204 tests, and there are 269.** Two places in the README and one in
+  the guide; the number had been stale for several releases and only the README reaches the
+  registry, so it took a version of its own to correct there.
+- **The rule about the staged payload stopped before the part that bites.** `CLAUDE.md`
+  described shipping `build/plugin` rather than the working directory, but not that the
+  marketplace root is the repo — so a clone without that tree cannot install the plugin, and
+  finds out late, because `marketplace add` validates the manifest without checking that its
+  source resolves. That gap is what let 0.7.2 through 0.7.5 ship a plugin nobody could
+  install. Written down now, together with why `bin` reaches into `build/plugin`: the payload
+  must contain the bundle, so the CLI points at that copy instead of shipping a second one.
+- No code changed. `dist/guardian.cjs` differs from 0.7.7 only in the version string.
+
 ## 0.7.7
 
 The package carried the bundle twice.
