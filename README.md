@@ -104,10 +104,17 @@ Two halves, and you want both. The **binary** senses and holds the state; the **
 carries the hooks that act on it, plus the `/guardian` commands.
 
 ```bash
-npm install && npm run build
-npm install -g .                    # puts `guardian` on PATH
-guardian install                    # wires the status line
+npm install -g claude-session-guardian   # puts `guardian` on PATH
+guardian install                         # wires the status line
+```
 
+The plugin half wants the repo, because the staged payload is deliberately not committed —
+`build/plugin` is built, never checked in, so that a marketplace source can never pick up
+whatever else happens to be sitting in the working directory:
+
+```bash
+git clone https://github.com/HusseinTaha/claude-session-guardian.git
+cd claude-session-guardian && npm install
 npm run stage-plugin                # build/plugin: exactly the payload, nothing else
 claude plugin marketplace add .     # hooks, skill and /guardian commands
 claude plugin install claude-session-guardian@claude-session-guardian

@@ -30,17 +30,16 @@ Guardian is two halves, and a full install wants both.
 
 | Half | Gives you | Installed by |
 |---|---|---|
-| the binary | the gauge, the state, every CLI command, as `guardian` (and `claude-guardian`, for a PATH that already has a `guardian`) | `npm install -g .` |
+| the binary | the gauge, the state, every CLI command, as `guardian` (and `claude-guardian`, for a PATH that already has a `guardian`) | `npm install -g claude-session-guardian` |
 | the plugin | the hooks that act on that state, the `guardian-protocol` skill, `/guardian` | `claude plugin install` |
 
 ```bash
-git clone <this repo> && cd claude-session-guardian
-npm install
-npm run build
+npm install -g claude-session-guardian   # puts `guardian` on PATH, everywhere
+guardian install                        # wires the status line into ~/.claude/settings.json
 
-npm install -g .            # puts `guardian` on PATH, everywhere
-guardian install            # wires the status line into ~/.claude/settings.json
-
+# the plugin half needs the repo: build/plugin is staged, never committed
+git clone https://github.com/HusseinTaha/claude-session-guardian.git
+cd claude-session-guardian && npm install
 npm run stage-plugin        # stages build/plugin: exactly the plugin payload, nothing else
 claude plugin marketplace add .
 claude plugin install claude-session-guardian@claude-session-guardian
