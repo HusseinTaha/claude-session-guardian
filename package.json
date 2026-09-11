@@ -1,6 +1,6 @@
 {
   "name": "claude-session-guardian",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "author": "Hussein Taha",
   "repository": {
     "type": "git",
@@ -14,20 +14,15 @@
   "license": "MIT",
   "type": "module",
   "bin": {
-    "guardian": "dist/guardian.cjs",
-    "claude-guardian": "dist/guardian.cjs"
+    "guardian": "build/plugin/dist/guardian.cjs",
+    "claude-guardian": "build/plugin/dist/guardian.cjs"
   },
   "files": [
-    ".claude-plugin/",
+    ".claude-plugin/marketplace.json",
     "build/plugin/",
     "CHANGELOG.md",
     "README.md",
-    "commands/",
-    "dist/",
-    "hooks/",
-    "mcp/",
-    "settings.json",
-    "skills/"
+    "mcp/"
   ],
   "engines": {
     "node": ">=18"

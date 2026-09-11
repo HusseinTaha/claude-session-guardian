@@ -5,7 +5,7 @@
 var import_node_fs19 = require("node:fs");
 
 // src/version.ts
-var VERSION = "0.7.6";
+var VERSION = "0.7.7";
 
 // src/sensors/statusline.ts
 var import_node_fs8 = require("node:fs");

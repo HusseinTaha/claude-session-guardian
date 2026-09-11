@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.7.7
+
+The package carried the bundle twice.
+
+- **One copy of `dist/guardian.cjs`, not two.** Tracking the staged payload in 0.7.6 made the
+  tarball ship the bundle at the root, for `bin`, and again inside `build/plugin`, for the
+  plugin — 314kB of the 424kB unpacked was the same 157kB file written out twice. `bin` now
+  points at the staged copy, which is the one the payload has to contain anyway, and the root
+  `dist/` leaves the package. 424kB to 248kB, 33 files to 20.
+- **`commands/`, `hooks/` and `skills/` left the root too.** They are the same files
+  `build/plugin` already carries, and nothing reads the root copies once the marketplace
+  source is the staged tree. `settings.json` went with them: it holds a `$comment` and
+  nothing else, and no code, manifest or document has ever referenced it. The root
+  `.claude-plugin/plugin.json` is redundant for the same reason — the package root is a
+  marketplace, and the plugin it names carries its own manifest. `mcp/guardian.mcp.json`
+  stays: it is a template the guide tells you to copy.
+- Verified against the built tarball rather than the working tree: npm writes both shims,
+  `guardian version` answers from the installed copy, and the plugin still installs with
+  exactly its seven entries.
+
 ## 0.7.6
 
 The plugin could be installed from nowhere.

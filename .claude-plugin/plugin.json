@@ -1,7 +1,7 @@
 {
   "name": "claude-session-guardian",
   "displayName": "Claude Session Guardian",
-  "version": "0.7.6",
+  "version": "0.7.7",
   "description": "Sees every exhaustion wall coming with time-to-impact, not just a percentage, and lands the session before it hits.",
   "license": "MIT",
   "keywords": [

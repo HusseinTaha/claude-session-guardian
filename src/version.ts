@@ -4,4 +4,4 @@
  *  0.5.0 while package.json and the plugin manifest both said 0.7.1. A number nobody
  *  checks quietly stops being true, so `test/version.test.ts` pins all three together.
  *  Bump this, package.json and .claude-plugin/plugin.json in the same commit. */
-export const VERSION = '0.7.6';
+export const VERSION = '0.7.7';
