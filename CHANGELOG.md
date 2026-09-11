@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.5
+
+Verified on Linux, which turned up one test that could never finish there.
+
+- **`npm test` never completed on Linux, and said nothing about why.** The fail-open test
+  needs a project directory that cannot be created, and used one under `/proc`. On Linux
+  `mkdirSync(recursive)` does not throw on procfs — measured, it never returns at all,
+  spinning on CPU with the process in state `R`. That starves the event loop, so the run
+  died at a timeout having reported not one subtest: the runner buffers a file's output
+  until the file ends, and the file never ended. A path whose parent is a file fails with
+  ENOTDIR on Linux and macOS alike and returns in under 200ms.
+- **Nothing in the shipped bundle changed.** The suite now runs green on both platforms —
+  269 on Windows, 269 on Linux, checked against a clean `npm install` on `node:24` rather
+  than a Windows tree. Guardian's own path handling was never at fault: `resolveStateRoot`
+  answered correctly in 1ms for the same input that hung the directory create.
+
 ## 0.7.4
 
 Documentation. 0.7.3 shipped install instructions for a clone that no longer has to exist.
