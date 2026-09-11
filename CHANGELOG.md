@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.7.3
+
+A renamed payload is not a fixed leak.
+
+- **The sweep matched one name, and the leak had two.** The cleanup added in 0.7.2 matched
+  `stdin.<pid>.<ts>.txt` and nothing else, so it stepped straight over 2546
+  `chain-stdin.<pid>.json` files — the name the status line wrote before the helper was
+  unified — while reporting a clean directory. One project's state dir had been holding
+  them since 2026-09-02. Sweeping on age alone would cover every name at once, and is what
+  a tool that owns its directory outright can afford; Guardian's default payload directory
+  is the OS temp dir, where age-only deletes other people's files. Matching on name is the
+  price of that safety, and the cost of the price is that the list has to hold every name
+  this tool has ever written — so it does, with a comment saying anything added stays
+  added, and the gate now asserts the older name is collected too. Measured: the 2546
+  drained to zero once the widened sweep was deployed.
+
 ## 0.7.2
 
 A watchdog that outlived the session it was watching.
@@ -245,7 +261,7 @@ reconstruction still reads far below the wall. None is an estimator blind spot.
 - **The heredoc fix threw away everything after the body.** Truncating at the first `<<`
   meant a call that opened with a `python - <<PY` patch and went on to commit was classified
   by the word `python`, so the commit never reached the manifest — Guardian's own handoff was
-  missing its own last commit, `0ef60d8`. Heredocs are removed marker-to-terminator now,
+  missing its own last commit, `3ece0f5`. Heredocs are removed marker-to-terminator now,
   keeping what follows, and a commit is detected anywhere in the line rather than only when
   the line begins with `git`.
 - `npm run perf` covers PostToolUse, which now runs on every tool call rather than on edits
